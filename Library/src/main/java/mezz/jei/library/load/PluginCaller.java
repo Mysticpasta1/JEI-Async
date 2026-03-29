@@ -6,6 +6,7 @@ import mezz.jei.api.IModPlugin;
 import mezz.jei.common.config.DebugConfig;
 import mezz.jei.core.util.TimeUtil;
 import mezz.jei.library.plugins.vanilla.VanillaPlugin;
+import net.minecraft.client.Minecraft;
 import net.minecraft.resources.ResourceLocation;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -92,6 +93,115 @@ public class PluginCaller {
 		}
 
 		LOGGER.info("{} took {}", title, TimeUtil.toHumanString(stopwatch.elapsed()));
+	}
+
+	/**
+	 * Execute all plugins sequentially on the current thread.
+	 * Used by the background loading pipeline where the caller is already on a background thread.
+	 */
+	public static void callOnPluginsSequential(String title, List<IModPlugin> plugins, Consumer<IModPlugin> func) {
+		LOGGER.info("{}...", title);
+		Stopwatch stopwatch = Stopwatch.createStarted();
+		callOnPluginsSync(title, plugins, func);
+		LOGGER.info("{} took {}", title, TimeUtil.toHumanString(stopwatch.elapsed()));
+	}
+
+	/**
+	 * Execute plugins sequentially with auto-fallback for failures.
+	 * If a plugin fails on the background thread, it is retried on the main thread.
+	 * Failed plugins are recorded in the IncompatiblePluginStore for future runs.
+	 */
+	public static void callOnPluginsWithFallback(
+		String title,
+		List<IModPlugin> plugins,
+		Consumer<IModPlugin> func,
+		IncompatiblePluginStore store
+	) {
+		LOGGER.info("{}...", title);
+		Stopwatch stopwatch = Stopwatch.createStarted();
+
+		try (PluginCallerTimer timer = new PluginCallerTimer()) {
+			for (IModPlugin plugin : plugins) {
+				ResourceLocation pluginUid = plugin.getPluginUid();
+
+				if (store.isIncompatible(plugin)) {
+					// Known incompatible: run on main thread directly
+					LOGGER.info("{} - running {} on main thread (known incompatible)", title, pluginUid);
+					timer.begin(title + " [main-thread]", pluginUid);
+					try {
+						executeOnMainThreadBlocking(() -> func.accept(plugin));
+					} catch (RuntimeException | LinkageError e) {
+						if (plugin instanceof VanillaPlugin) {
+							throw e;
+						}
+						LOGGER.error("Plugin {} failed on main thread: {} {}", pluginUid, plugin.getClass(), pluginUid, e);
+					}
+					timer.end();
+				} else {
+					// Try on background thread first
+					timer.begin(title, pluginUid);
+					try {
+						func.accept(plugin);
+						timer.end();
+					} catch (RuntimeException | LinkageError e) {
+						timer.end();
+						if (plugin instanceof VanillaPlugin) {
+							throw e;
+						}
+						LOGGER.warn("{} - plugin {} failed on background thread, retrying on main thread", title, pluginUid, e);
+						store.markIncompatible(plugin);
+
+						timer.begin(title + " [main-thread retry]", pluginUid);
+						try {
+							executeOnMainThreadBlocking(() -> func.accept(plugin));
+						} catch (RuntimeException | LinkageError e2) {
+							LOGGER.error("{} - plugin {} also failed on main thread", title, pluginUid, e2);
+						}
+						timer.end();
+					}
+				}
+			}
+		}
+
+		LOGGER.info("{} took {}", title, TimeUtil.toHumanString(stopwatch.elapsed()));
+	}
+
+	/**
+	 * Execute a task on the main thread and block the current thread until it completes.
+	 * Used by background loading to retry failed plugins on the main thread.
+	 */
+	private static void executeOnMainThreadBlocking(Runnable task) {
+		Minecraft minecraft = Minecraft.getInstance();
+		if (minecraft.isSameThread()) {
+			task.run();
+			return;
+		}
+
+		CompletableFuture<Void> future = new CompletableFuture<>();
+		minecraft.execute(() -> {
+			try {
+				task.run();
+				future.complete(null);
+			} catch (RuntimeException | LinkageError e) {
+				future.completeExceptionally(e);
+			}
+		});
+
+		try {
+			future.get();
+		} catch (ExecutionException e) {
+			Throwable cause = e.getCause();
+			if (cause instanceof RuntimeException re) {
+				throw re;
+			}
+			if (cause instanceof LinkageError le) {
+				throw le;
+			}
+			throw new RuntimeException(cause);
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			throw new RuntimeException("Interrupted while waiting for main thread execution", e);
+		}
 	}
 
 	/**

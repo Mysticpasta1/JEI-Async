@@ -66,25 +66,33 @@ public final class PluginLoader {
 	private PluginLoader() {}
 
 	public static SubtypeManager registerSubtypes(StartData data) {
+		return registerSubtypes(data, false, null);
+	}
+
+	public static SubtypeManager registerSubtypes(StartData data, boolean useAsyncFallback, IncompatiblePluginStore incompatiblePluginStore) {
 		IPlatformFluidHelperInternal<?> fluidHelper = Services.PLATFORM.getFluidHelper();
 		List<IModPlugin> plugins = data.plugins();
 		SubtypeRegistration subtypeRegistration = new SubtypeRegistration();
-		PluginCaller.callOnPlugins("Registering item subtypes", plugins, p -> p.registerItemSubtypes(subtypeRegistration));
-		PluginCaller.callOnPlugins("Registering fluid subtypes", plugins, p ->
-			p.registerFluidSubtypes(subtypeRegistration, fluidHelper)
+		callPlugins("Registering item subtypes", plugins, p -> p.registerItemSubtypes(subtypeRegistration), useAsyncFallback, incompatiblePluginStore);
+		callPlugins("Registering fluid subtypes", plugins, p ->
+			p.registerFluidSubtypes(subtypeRegistration, fluidHelper), useAsyncFallback, incompatiblePluginStore
 		);
 		SubtypeInterpreters subtypeInterpreters = subtypeRegistration.getInterpreters();
 		return new SubtypeManager(subtypeInterpreters);
 	}
 
 	public static IIngredientManager registerIngredients(StartData data, SubtypeManager subtypeManager, IColorHelper colorHelper, IIngredientFilterConfig ingredientFilterConfig) {
+		return registerIngredients(data, subtypeManager, colorHelper, ingredientFilterConfig, false, null);
+	}
+
+	public static IIngredientManager registerIngredients(StartData data, SubtypeManager subtypeManager, IColorHelper colorHelper, IIngredientFilterConfig ingredientFilterConfig, boolean useAsyncFallback, IncompatiblePluginStore incompatiblePluginStore) {
 		List<IModPlugin> plugins = data.plugins();
 		IngredientManagerBuilder ingredientManagerBuilder = new IngredientManagerBuilder(subtypeManager, colorHelper);
-		PluginCaller.callOnPlugins("Registering ingredients", plugins, p -> p.registerIngredients(ingredientManagerBuilder));
-		PluginCaller.callOnPlugins("Registering extra ingredients", plugins, p -> p.registerExtraIngredients(ingredientManagerBuilder));
+		callPlugins("Registering ingredients", plugins, p -> p.registerIngredients(ingredientManagerBuilder), useAsyncFallback, incompatiblePluginStore);
+		callPlugins("Registering extra ingredients", plugins, p -> p.registerExtraIngredients(ingredientManagerBuilder), useAsyncFallback, incompatiblePluginStore);
 
 		if (ingredientFilterConfig.getSearchIngredientAliases()) {
-			PluginCaller.callOnPlugins("Registering search ingredient aliases", plugins, p -> p.registerIngredientAliases(ingredientManagerBuilder));
+			callPlugins("Registering search ingredient aliases", plugins, p -> p.registerIngredientAliases(ingredientManagerBuilder), useAsyncFallback, incompatiblePluginStore);
 		}
 		return ingredientManagerBuilder.build();
 	}
@@ -93,12 +101,21 @@ public final class PluginLoader {
 		StartData data,
 		IIngredientFilterConfig ingredientFilterConfig
 	) {
+		return registerModAliases(data, ingredientFilterConfig, false, null);
+	}
+
+	public static ImmutableSetMultimap<String, String> registerModAliases(
+		StartData data,
+		IIngredientFilterConfig ingredientFilterConfig,
+		boolean useAsyncFallback,
+		IncompatiblePluginStore incompatiblePluginStore
+	) {
 		List<IModPlugin> plugins = data.plugins();
 		if (!ingredientFilterConfig.getSearchModAliases()) {
 			return ImmutableSetMultimap.of();
 		}
 		ModInfoRegistration modInfoRegistration = new ModInfoRegistration();
-		PluginCaller.callOnPlugins("Registering Mod Info", plugins, p -> p.registerModInfo(modInfoRegistration));
+		callPlugins("Registering Mod Info", plugins, p -> p.registerModInfo(modInfoRegistration), useAsyncFallback, incompatiblePluginStore);
 		return modInfoRegistration.getModAliases();
 	}
 
@@ -132,21 +149,25 @@ public final class PluginLoader {
 	}
 
 	@Unmodifiable
-	private static List<IRecipeCategory<?>> createRecipeCategories(List<IModPlugin> plugins, VanillaPlugin vanillaPlugin, JeiHelpers jeiHelpers) {
+	private static List<IRecipeCategory<?>> createRecipeCategories(List<IModPlugin> plugins, VanillaPlugin vanillaPlugin, JeiHelpers jeiHelpers, boolean useAsyncFallback, IncompatiblePluginStore incompatiblePluginStore) {
 		RecipeCategoryRegistration recipeCategoryRegistration = new RecipeCategoryRegistration(jeiHelpers);
-		PluginCaller.callOnPlugins("Registering categories", plugins, p -> p.registerCategories(recipeCategoryRegistration));
+		callPlugins("Registering categories", plugins, p -> p.registerCategories(recipeCategoryRegistration), useAsyncFallback, incompatiblePluginStore);
 		CraftingRecipeCategory craftingCategory = vanillaPlugin.getCraftingCategory()
 			.orElseThrow(() -> new NullPointerException("vanilla crafting category"));
 		SmithingRecipeCategory smithingCategory = vanillaPlugin.getSmithingCategory()
 			.orElseThrow(() -> new NullPointerException("vanilla smithing category"));
 		VanillaCategoryExtensionRegistration vanillaCategoryExtensionRegistration = new VanillaCategoryExtensionRegistration(craftingCategory, smithingCategory, jeiHelpers);
-		PluginCaller.callOnPlugins("Registering vanilla category extensions", plugins, p -> p.registerVanillaCategoryExtensions(vanillaCategoryExtensionRegistration));
+		callPlugins("Registering vanilla category extensions", plugins, p -> p.registerVanillaCategoryExtensions(vanillaCategoryExtensionRegistration), useAsyncFallback, incompatiblePluginStore);
 		return recipeCategoryRegistration.getRecipeCategories();
 	}
 
 	public static IScreenHelper createGuiScreenHelper(List<IModPlugin> plugins, IJeiHelpers jeiHelpers, IIngredientManager ingredientManager) {
+		return createGuiScreenHelper(plugins, jeiHelpers, ingredientManager, false, null);
+	}
+
+	public static IScreenHelper createGuiScreenHelper(List<IModPlugin> plugins, IJeiHelpers jeiHelpers, IIngredientManager ingredientManager, boolean useAsyncFallback, IncompatiblePluginStore incompatiblePluginStore) {
 		GuiHandlerRegistration guiHandlerRegistration = new GuiHandlerRegistration(jeiHelpers);
-		PluginCaller.callOnPlugins("Registering gui handlers", plugins, p -> p.registerGuiHandlers(guiHandlerRegistration));
+		callPlugins("Registering gui handlers", plugins, p -> p.registerGuiHandlers(guiHandlerRegistration), useAsyncFallback, incompatiblePluginStore);
 		return guiHandlerRegistration.createGuiScreenHelper(ingredientManager);
 	}
 
@@ -156,12 +177,23 @@ public final class PluginLoader {
 		JeiHelpers jeiHelpers,
 		IConnectionToServer connectionToServer
 	) {
+		return createRecipeTransferManager(vanillaPlugin, plugins, jeiHelpers, connectionToServer, false, null);
+	}
+
+	public static IRecipeTransferManager createRecipeTransferManager(
+		VanillaPlugin vanillaPlugin,
+		List<IModPlugin> plugins,
+		JeiHelpers jeiHelpers,
+		IConnectionToServer connectionToServer,
+		boolean useAsyncFallback,
+		IncompatiblePluginStore incompatiblePluginStore
+	) {
 		IStackHelper stackHelper = jeiHelpers.getStackHelper();
 		CraftingRecipeCategory craftingCategory = vanillaPlugin.getCraftingCategory()
 			.orElseThrow(() -> new NullPointerException("vanilla crafting category"));
 		IRecipeTransferHandlerHelper handlerHelper = new RecipeTransferHandlerHelper(stackHelper, craftingCategory);
 		RecipeTransferRegistration recipeTransferRegistration = new RecipeTransferRegistration(stackHelper, handlerHelper, jeiHelpers, connectionToServer);
-		PluginCaller.callOnPlugins("Registering recipes transfer handlers", plugins, p -> p.registerRecipeTransferHandlers(recipeTransferRegistration));
+		callPlugins("Registering recipes transfer handlers", plugins, p -> p.registerRecipeTransferHandlers(recipeTransferRegistration), useAsyncFallback, incompatiblePluginStore);
 		return recipeTransferRegistration.createRecipeTransferManager();
 	}
 
@@ -172,10 +204,22 @@ public final class PluginLoader {
 		JeiHelpers jeiHelpers,
 		IIngredientManager ingredientManager
 	) {
-		List<IRecipeCategory<?>> recipeCategories = createRecipeCategories(plugins, vanillaPlugin, jeiHelpers);
+		return createRecipeManager(plugins, vanillaPlugin, recipeCategorySortingConfig, jeiHelpers, ingredientManager, false, null);
+	}
+
+	public static RecipeManager createRecipeManager(
+		List<IModPlugin> plugins,
+		VanillaPlugin vanillaPlugin,
+		RecipeCategorySortingConfig recipeCategorySortingConfig,
+		JeiHelpers jeiHelpers,
+		IIngredientManager ingredientManager,
+		boolean useAsyncFallback,
+		IncompatiblePluginStore incompatiblePluginStore
+	) {
+		List<IRecipeCategory<?>> recipeCategories = createRecipeCategories(plugins, vanillaPlugin, jeiHelpers, useAsyncFallback, incompatiblePluginStore);
 
 		RecipeCatalystRegistration recipeCatalystRegistration = new RecipeCatalystRegistration(ingredientManager, jeiHelpers);
-		PluginCaller.callOnPlugins("Registering recipe catalysts", plugins, p -> p.registerRecipeCatalysts(recipeCatalystRegistration));
+		callPlugins("Registering recipe catalysts", plugins, p -> p.registerRecipeCatalysts(recipeCatalystRegistration), useAsyncFallback, incompatiblePluginStore);
 		ImmutableListMultimap<RecipeType<?>, ITypedIngredient<?>> recipeCatalysts = recipeCatalystRegistration.getRecipeCatalysts();
 
 		LoggedTimer timer = new LoggedTimer();
@@ -192,7 +236,7 @@ public final class PluginLoader {
 		IJeiFeatures jeiFeatures = Internal.getJeiFeatures();
 		RecipeManagerPluginHelper recipeManagerPluginHelper = new RecipeManagerPluginHelper(recipeManagerInternal);
 		AdvancedRegistration advancedRegistration = new AdvancedRegistration(jeiHelpers, jeiFeatures, recipeManagerPluginHelper);
-		PluginCaller.callOnPlugins("Registering advanced plugins", plugins, p -> p.registerAdvanced(advancedRegistration));
+		callPlugins("Registering advanced plugins", plugins, p -> p.registerAdvanced(advancedRegistration), useAsyncFallback, incompatiblePluginStore);
 
 		List<IRecipeManagerPlugin> recipeManagerPlugins = advancedRegistration.getRecipeManagerPlugins();
 		List<IRecipeButtonControllerFactory> recipeButtonControllerFactories = advancedRegistration.getRecipeButtonControllerFactories();
@@ -200,10 +244,27 @@ public final class PluginLoader {
 		recipeManagerInternal.addPlugins(recipeManagerPlugins);
 
 		RecipeRegistration recipeRegistration = new RecipeRegistration(jeiHelpers, ingredientManager, recipeManagerInternal);
-		PluginCaller.callOnPlugins("Registering recipes", plugins, p -> p.registerRecipes(recipeRegistration));
+		callPlugins("Registering recipes", plugins, p -> p.registerRecipes(recipeRegistration), useAsyncFallback, incompatiblePluginStore);
 
 		recipeManagerInternal.compact();
 
 		return new RecipeManager(recipeManagerInternal, ingredientManager, recipeCategoryDecorators, recipeButtonControllerFactories);
+	}
+
+	/**
+	 * Route plugin calls to the appropriate method based on whether async fallback is enabled.
+	 */
+	private static void callPlugins(
+		String title,
+		List<IModPlugin> plugins,
+		java.util.function.Consumer<IModPlugin> func,
+		boolean useAsyncFallback,
+		IncompatiblePluginStore incompatiblePluginStore
+	) {
+		if (useAsyncFallback && incompatiblePluginStore != null) {
+			PluginCaller.callOnPluginsWithFallback(title, plugins, func, incompatiblePluginStore);
+		} else {
+			PluginCaller.callOnPlugins(title, plugins, func);
+		}
 	}
 }
