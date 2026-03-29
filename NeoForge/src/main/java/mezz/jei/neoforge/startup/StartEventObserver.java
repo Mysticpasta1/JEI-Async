@@ -1,5 +1,6 @@
 package mezz.jei.neoforge.startup;
 
+import mezz.jei.gui.overlay.LoadingOverlayRenderer;
 import mezz.jei.neoforge.events.PermanentEventSubscriptions;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.ConnectScreen;
@@ -60,6 +61,10 @@ public class StartEventObserver implements ResourceManagerReloadListener {
 				logReceivedEvent(event);
 				transitionState(State.LISTENING);
 			}
+		});
+
+		subscriptions.register(ScreenEvent.Render.Post.class, event -> {
+			LoadingOverlayRenderer.renderLoadingOverlay(event.getScreen(), event.getGuiGraphics());
 		});
 
 		subscriptions.register(ScreenEvent.Init.Pre.class, event -> {

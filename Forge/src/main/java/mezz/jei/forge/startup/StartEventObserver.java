@@ -1,6 +1,7 @@
 package mezz.jei.forge.startup;
 
 import mezz.jei.forge.events.PermanentEventSubscriptions;
+import mezz.jei.gui.overlay.LoadingOverlayRenderer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
@@ -61,6 +62,10 @@ public class StartEventObserver {
 				LOGGER.info("JEI StartEventObserver received {}", event.getClass());
 				transitionState(State.DISABLED);
 			}
+		});
+
+		subscriptions.register(ScreenEvent.Render.Post.class, event -> {
+			LoadingOverlayRenderer.renderLoadingOverlay(event.getScreen(), event.getGuiGraphics());
 		});
 
 		subscriptions.register(ScreenEvent.Init.Pre.class, event -> {

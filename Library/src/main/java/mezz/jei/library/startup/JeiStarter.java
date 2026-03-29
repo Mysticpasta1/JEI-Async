@@ -169,12 +169,14 @@ public final class JeiStarter {
 	private void doLoadingAsync() {
 		LoggedTimer totalTime = new LoggedTimer();
 		totalTime.start("Starting JEI (background)");
+		Internal.setLoadingProgress("Initializing...");
 		this.configManager.onJeiStarted();
 
 		JeiRuntime jeiRuntime = buildRuntime(true);
 
 		if (cancelled) {
 			LOGGER.info("JEI background loading was cancelled");
+			Internal.setLoadingProgress(null);
 			return;
 		}
 
@@ -183,10 +185,12 @@ public final class JeiStarter {
 		// Schedule runtime finalization on main thread
 		Minecraft.getInstance().execute(() -> {
 			if (cancelled) {
+				Internal.setLoadingProgress(null);
 				return;
 			}
 			PluginCaller.callOnPlugins("Sending Runtime", plugins, p -> p.onRuntimeAvailable(jeiRuntime));
 			Internal.setRuntime(jeiRuntime);
+			Internal.setLoadingProgress(null);
 			LOGGER.info("JEI has finished background loading and is now available.");
 		});
 	}
@@ -199,6 +203,7 @@ public final class JeiStarter {
 	 */
 	private JeiRuntime buildRuntime(boolean useAsyncFallback) {
 		loadingState = LoadingState.LOADING_SUBTYPES;
+		Internal.setLoadingProgress("Loading subtypes...");
 		IColorHelper colorHelper = new ColorHelper(colorNameConfig);
 		IIngredientFilterConfig ingredientFilterConfig = jeiClientConfigs.getIngredientFilterConfig();
 		SubtypeManager subtypeManager = PluginLoader.registerSubtypes(data, useAsyncFallback, incompatiblePluginStore);
@@ -208,6 +213,7 @@ public final class JeiStarter {
 		}
 
 		loadingState = LoadingState.LOADING_INGREDIENTS;
+		Internal.setLoadingProgress("Loading ingredients...");
 		IIngredientManager ingredientManager = PluginLoader.registerIngredients(data, subtypeManager, colorHelper, ingredientFilterConfig, useAsyncFallback, incompatiblePluginStore);
 
 		if (cancelled) {
@@ -234,6 +240,7 @@ public final class JeiStarter {
 		}
 
 		loadingState = LoadingState.LOADING_CATEGORIES;
+		Internal.setLoadingProgress("Loading categories & recipes...");
 		RecipeManager recipeManager = PluginLoader.createRecipeManager(
 			plugins,
 			vanillaPlugin,
@@ -249,6 +256,7 @@ public final class JeiStarter {
 		}
 
 		loadingState = LoadingState.BUILDING_RUNTIME;
+		Internal.setLoadingProgress("Building runtime...");
 		IRecipeTransferManager recipeTransferManager = PluginLoader.createRecipeTransferManager(
 			vanillaPlugin,
 			plugins,
@@ -301,6 +309,7 @@ public final class JeiStarter {
 		LOGGER.info("Stopping JEI");
 		cancelled = true;
 		loadingState = LoadingState.NOT_STARTED;
+		Internal.setLoadingProgress(null);
 
 		CompletableFuture<Void> future = loadingFuture.getAndSet(null);
 		if (future != null && !future.isDone()) {

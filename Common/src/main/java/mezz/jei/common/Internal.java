@@ -14,6 +14,7 @@ import net.minecraft.client.renderer.texture.TextureManager;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * For JEI internal use only, these are normally accessed from the API.
@@ -32,6 +33,7 @@ public final class Internal {
 	@Nullable
 	private static IJeiRuntime jeiRuntime;
 	private static final JeiFeatures jeiFeatures = new JeiFeatures();
+	private static final AtomicReference<String> loadingProgress = new AtomicReference<>(null);
 
 	private Internal() {
 
@@ -97,5 +99,18 @@ public final class Internal {
 		Preconditions.checkState(jeiRuntime != null, "Jei Client Configs have not been created yet.");
 
 		return jeiRuntime;
+	}
+
+	public static void setLoadingProgress(@Nullable String progress) {
+		loadingProgress.set(progress);
+	}
+
+	@Nullable
+	public static String getLoadingProgress() {
+		return loadingProgress.get();
+	}
+
+	public static boolean isLoading() {
+		return loadingProgress.get() != null;
 	}
 }
