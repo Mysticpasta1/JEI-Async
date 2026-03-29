@@ -29,6 +29,19 @@ public class JeiLifecycleEvents {
 				}
 			});
 
+	/**
+	 * Event fired when JEI has completed initialization and is ready for use.
+	 * Mods that depend on JEI being fully initialized should listen for this event.
+	 *
+	 * @since 1.21.1-async
+	 */
+	public static final Event<Runnable> INITIALIZED =
+			EventFactory.createArrayBacked(Runnable.class, callbacks -> () -> {
+				for (Runnable callback : callbacks) {
+					callback.run();
+				}
+			});
+
 	public static final Event<RegisterResourceReloadListener> REGISTER_RESOURCE_RELOAD_LISTENER =
 			EventFactory.createArrayBacked(RegisterResourceReloadListener.class, callbacks -> (resourceManager, textureManager) -> {
 				for (RegisterResourceReloadListener callback : callbacks) {

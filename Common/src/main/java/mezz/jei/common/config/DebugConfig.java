@@ -21,6 +21,7 @@ public final class DebugConfig {
 	private final Supplier<Boolean> crashingTestIngredientsEnabled;
 	private final Supplier<Boolean> crashingTestRecipesEnabled;
 	private final Supplier<Boolean> logSuffixTreeStats;
+	private final Supplier<Boolean> enableAsyncLoading;
 
 	private DebugConfig(IConfigSchemaBuilder schema) {
 		IConfigCategoryBuilder advanced = schema.addCategory("debug");
@@ -31,6 +32,7 @@ public final class DebugConfig {
 		crashingTestIngredientsEnabled = advanced.addBoolean("crashingTestItemsEnabled", false);
 		crashingTestRecipesEnabled =  advanced.addBoolean("crashingTestRecipesEnabled", false);
 		logSuffixTreeStats = advanced.addBoolean("logSuffixTreeStats", false);
+		enableAsyncLoading = advanced.addBoolean("enableAsyncLoading", true);
 	}
 
 	public static boolean isDebugModeEnabled() {
@@ -80,5 +82,12 @@ public final class DebugConfig {
 			return false;
 		}
 		return instance.logSuffixTreeStats.get();
+	}
+
+	public static boolean isAsyncLoadingEnabled() {
+		if (instance == null) {
+			return true; // Default to enabled
+		}
+		return instance.enableAsyncLoading.get();
 	}
 }

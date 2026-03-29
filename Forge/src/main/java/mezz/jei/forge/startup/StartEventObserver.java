@@ -135,6 +135,7 @@ public class StartEventObserver {
 					throw new IllegalStateException("Attempted Illegal state transition from " + this.state + " to " + newState);
 				}
 				this.startRunnable.run();
+				LOGGER.info("JEI has finished initializing. Mods can now access the JEI runtime via IModPlugin.onRuntimeAvailable().");
 			}
 		}
 

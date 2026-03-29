@@ -196,8 +196,9 @@ public class IngredientFilter implements
 
 		Stream<IListElement<?>> elementStream;
 		if (searchTokens.isEmpty()) {
-			elementStream = this.elementSearch.getAllIngredients()
-				.parallelStream();
+			// Use sequential stream instead of parallelStream to ensure deterministic ordering
+			// and prevent race conditions during async loading
+			elementStream = this.elementSearch.getAllIngredients().stream();
 		} else {
 			elementStream = searchTokens.stream()
 				.map(this::getSearchResults)
