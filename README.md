@@ -8,6 +8,18 @@ This means:
  * clean API for developers
  * not a coremod – no dependencies other than Forge.
 
+## JEI-Async
+This is a fork of JEI with **async/background loading** support. JEI loads entirely on a background thread, so joining a world is no longer blocked by JEI initialization. A loading indicator is shown in the top-right corner of the screen while JEI loads.
+
+### Performance Tip: Use ZGC
+For large modpacks, JEI's search index building is heavily affected by GC pressure. Switching to ZGC can dramatically reduce loading time (e.g. 39s → 11s in a 300+ mod pack).
+
+Add these JVM arguments to your launcher:
+```
+-XX:+UseZGC -XX:+ZGenerational -XX:+AlwaysPreTouch -XX:+DisableExplicitGC
+```
+**Important:** Remove any existing G1GC arguments (`-XX:+UseG1GC` and related options) when switching to ZGC.
+
 ### [JEI Developer Wiki](https://github.com/mezz/JustEnoughItems/wiki)
 
 # Latest Versions:

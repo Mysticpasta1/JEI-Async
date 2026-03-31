@@ -92,6 +92,7 @@ public class ElementSearch implements IElementSearch {
 			Object uid = getUid(info.getTypedIngredient(), ingredientManager);
 			this.allElements.put(uid, element);
 		}
+
 		for (PrefixedSearchable<IListElementInfo<?>, IListElement<?>> prefixedSearchable : this.prefixedSearchables.values()) {
 			SearchMode searchMode = prefixedSearchable.getMode();
 			if (searchMode != SearchMode.DISABLED) {

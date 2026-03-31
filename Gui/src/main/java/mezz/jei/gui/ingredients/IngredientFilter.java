@@ -84,8 +84,9 @@ public class IngredientFilter implements
 
 		LOGGER.info("Adding {} ingredients", ingredients.size());
 		for (IListElementInfo<?> ingredient : ingredients) {
-			addIngredient(ingredient);
+			updateHiddenState(ingredient.getElement());
 		}
+		this.elementSearch.addAll(ingredients, ingredientManager);
 		LOGGER.info("Added {} ingredients", ingredients.size());
 		if (DebugConfig.isLogSuffixTreeStatsEnabled()) {
 			this.elementSearch.logStatistics();
