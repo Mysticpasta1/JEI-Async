@@ -110,6 +110,9 @@ public class PluginCaller {
 	 * Execute plugins sequentially with auto-fallback for failures.
 	 * If a plugin fails on the background thread, it is retried on the main thread.
 	 * Failed plugins are recorded in the IncompatiblePluginStore for future runs.
+	 *
+	 * Known-incompatible plugins are batched into a single main-thread roundtrip
+	 * to avoid per-plugin synchronization overhead (~66ms per roundtrip).
 	 */
 	public static void callOnPluginsWithFallback(
 		String title,
@@ -120,46 +123,61 @@ public class PluginCaller {
 		LOGGER.info("{}...", title);
 		Stopwatch stopwatch = Stopwatch.createStarted();
 
+		// Separate into known-incompatible and async-capable plugins
+		List<IModPlugin> incompatiblePlugins = new ArrayList<>();
+		List<IModPlugin> asyncPlugins = new ArrayList<>();
+		for (IModPlugin plugin : plugins) {
+			if (store.isIncompatible(plugin)) {
+				incompatiblePlugins.add(plugin);
+			} else {
+				asyncPlugins.add(plugin);
+			}
+		}
+
 		try (PluginCallerTimer timer = new PluginCallerTimer()) {
-			for (IModPlugin plugin : plugins) {
+			// Execute async-capable plugins on background thread
+			List<IModPlugin> newlyFailed = new ArrayList<>();
+			for (IModPlugin plugin : asyncPlugins) {
 				ResourceLocation pluginUid = plugin.getPluginUid();
-
-				if (store.isIncompatible(plugin)) {
-					// Known incompatible: run on main thread directly
-					LOGGER.info("{} - running {} on main thread (known incompatible)", title, pluginUid);
-					timer.begin(title + " [main-thread]", pluginUid);
-					try {
-						executeOnMainThreadBlocking(() -> func.accept(plugin));
-					} catch (RuntimeException | LinkageError e) {
-						if (plugin instanceof VanillaPlugin) {
-							throw e;
-						}
-						LOGGER.error("Plugin {} failed on main thread: {} {}", pluginUid, plugin.getClass(), pluginUid, e);
-					}
+				timer.begin(title, pluginUid);
+				try {
+					func.accept(plugin);
 					timer.end();
-				} else {
-					// Try on background thread first
-					timer.begin(title, pluginUid);
-					try {
-						func.accept(plugin);
-						timer.end();
-					} catch (RuntimeException | LinkageError e) {
-						timer.end();
-						if (plugin instanceof VanillaPlugin) {
-							throw e;
-						}
-						LOGGER.warn("{} - plugin {} failed on background thread, retrying on main thread", title, pluginUid, e);
-						store.markIncompatible(plugin);
+				} catch (RuntimeException | LinkageError e) {
+					timer.end();
+					if (plugin instanceof VanillaPlugin) {
+						throw e;
+					}
+					LOGGER.warn("{} - plugin {} failed on background thread, will retry on main thread", title, pluginUid, e);
+					store.markIncompatible(plugin);
+					newlyFailed.add(plugin);
+				}
+			}
 
-						timer.begin(title + " [main-thread retry]", pluginUid);
+			// Batch all incompatible plugins into a single main-thread roundtrip
+			List<IModPlugin> mainThreadPlugins = new ArrayList<>(incompatiblePlugins.size() + newlyFailed.size());
+			mainThreadPlugins.addAll(incompatiblePlugins);
+			mainThreadPlugins.addAll(newlyFailed);
+
+			if (!mainThreadPlugins.isEmpty()) {
+				if (incompatiblePlugins.size() > 0) {
+					LOGGER.info("{} - running {} known-incompatible plugins on main thread (batched)", title, incompatiblePlugins.size());
+				}
+				executeOnMainThreadBlocking(() -> {
+					for (IModPlugin plugin : mainThreadPlugins) {
+						ResourceLocation pluginUid = plugin.getPluginUid();
+						timer.begin(title + " [main-thread]", pluginUid);
 						try {
-							executeOnMainThreadBlocking(() -> func.accept(plugin));
-						} catch (RuntimeException | LinkageError e2) {
-							LOGGER.error("{} - plugin {} also failed on main thread", title, pluginUid, e2);
+							func.accept(plugin);
+						} catch (RuntimeException | LinkageError e) {
+							if (plugin instanceof VanillaPlugin) {
+								throw e;
+							}
+							LOGGER.error("Plugin {} failed on main thread: {} {}", pluginUid, plugin.getClass(), pluginUid, e);
 						}
 						timer.end();
 					}
-				}
+				});
 			}
 		}
 
