@@ -20,6 +20,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -87,23 +88,72 @@ public class ElementSearch implements IElementSearch {
 
 	@Override
 	public void addAll(Collection<IListElementInfo<?>> infos, IIngredientManager ingredientManager) {
+		addAll(infos, ingredientManager, null);
+	}
+
+	public void addAll(Collection<IListElementInfo<?>> infos, IIngredientManager ingredientManager, @Nullable SearchStringCache cache) {
+		// Build UID map for runtime identity
 		for (IListElementInfo<?> info : infos) {
 			IListElement<?> element = info.getElement();
 			Object uid = getUid(info.getTypedIngredient(), ingredientManager);
 			this.allElements.put(uid, element);
 		}
 
-		for (PrefixedSearchable<IListElementInfo<?>, IListElement<?>> prefixedSearchable : this.prefixedSearchables.values()) {
+		boolean useCache = cache != null && cache.isCacheAvailable();
+		boolean collectForCache = cache != null && !cache.isCacheAvailable();
+		if (collectForCache) {
+			cache.startCollecting();
+		}
+
+		for (Map.Entry<PrefixInfo<IListElementInfo<?>, IListElement<?>>, PrefixedSearchable<IListElementInfo<?>, IListElement<?>>> entry : this.prefixedSearchables.entrySet()) {
+			PrefixInfo<IListElementInfo<?>, IListElement<?>> prefixInfo = entry.getKey();
+			PrefixedSearchable<IListElementInfo<?>, IListElement<?>> prefixedSearchable = entry.getValue();
 			SearchMode searchMode = prefixedSearchable.getMode();
-			if (searchMode != SearchMode.DISABLED) {
-				ISearchStorage<IListElement<?>> storage = prefixedSearchable.getSearchStorage();
-				for (IListElementInfo<?> info : infos) {
-					Collection<String> strings = prefixedSearchable.getStrings(info);
-					for (String string : strings) {
-						storage.put(string, info.getElement());
+			if (searchMode == SearchMode.DISABLED) {
+				continue;
+			}
+
+			char prefix = prefixInfo.getPrefix();
+			ISearchStorage<IListElement<?>> storage = prefixedSearchable.getSearchStorage();
+			int cacheHits = 0;
+			int cacheMisses = 0;
+
+			// Use list index as cache key - stable across JVM runs
+			// (cache key hash already validates the ingredient list is identical)
+			int index = 0;
+			for (IListElementInfo<?> info : infos) {
+				String cacheId = String.valueOf(index++);
+				Collection<String> strings;
+
+				if (useCache) {
+					List<String> cached = cache.getCachedStrings(cacheId, prefix);
+					if (cached != null) {
+						strings = cached;
+						cacheHits++;
+					} else {
+						strings = prefixedSearchable.getStrings(info);
+						cacheMisses++;
 					}
+				} else {
+					strings = prefixedSearchable.getStrings(info);
+				}
+
+				if (collectForCache) {
+					cache.recordStrings(cacheId, prefix, strings);
+				}
+
+				for (String string : strings) {
+					storage.put(string, info.getElement());
 				}
 			}
+
+			if (useCache) {
+				LOGGER.info("ElementSearch {}: cache hits={}, misses={}", prefixInfo, cacheHits, cacheMisses);
+			}
+		}
+
+		if (collectForCache) {
+			cache.saveAsync();
 		}
 	}
 

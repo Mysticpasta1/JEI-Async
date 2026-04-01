@@ -19,6 +19,7 @@ import mezz.jei.gui.search.ElementPrefixParser;
 import mezz.jei.gui.search.ElementSearch;
 import mezz.jei.gui.search.ElementSearchLowMem;
 import mezz.jei.gui.search.IElementSearch;
+import mezz.jei.gui.search.SearchStringCache;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.Nullable;
@@ -70,7 +71,8 @@ public class IngredientFilter implements
 		IModIdHelper modIdHelper,
 		IIngredientVisibility ingredientVisibility,
 		IColorHelper colorHelper,
-		IClientToggleState clientToggleState
+		IClientToggleState clientToggleState,
+		@Nullable SearchStringCache searchStringCache
 	) {
 		this.filterTextSource = filterTextSource;
 		this.clientConfig = clientConfig;
@@ -86,7 +88,11 @@ public class IngredientFilter implements
 		for (IListElementInfo<?> ingredient : ingredients) {
 			updateHiddenState(ingredient.getElement());
 		}
-		this.elementSearch.addAll(ingredients, ingredientManager);
+		if (this.elementSearch instanceof ElementSearch elementSearchImpl && searchStringCache != null) {
+			elementSearchImpl.addAll(ingredients, ingredientManager, searchStringCache);
+		} else {
+			this.elementSearch.addAll(ingredients, ingredientManager);
+		}
 		LOGGER.info("Added {} ingredients", ingredients.size());
 		if (DebugConfig.isLogSuffixTreeStatsEnabled()) {
 			this.elementSearch.logStatistics();

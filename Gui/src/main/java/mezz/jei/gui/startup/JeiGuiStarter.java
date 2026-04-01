@@ -58,6 +58,7 @@ import mezz.jei.gui.overlay.IngredientListOverlay;
 import mezz.jei.gui.overlay.bookmarks.BookmarkOverlay;
 import mezz.jei.gui.overlay.bookmarks.history.LookupHistory;
 import mezz.jei.gui.recipes.RecipesGui;
+import mezz.jei.gui.search.SearchStringCache;
 import mezz.jei.gui.util.FocusUtil;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -65,6 +66,7 @@ import net.minecraft.core.RegistryAccess;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
@@ -127,6 +129,8 @@ public class JeiGuiStarter {
 			ingredientList
 		);
 
+		SearchStringCache searchStringCache = createSearchStringCache(ingredientList);
+
 		IngredientFilter ingredientFilter = new IngredientFilter(
 			filterTextSource,
 			clientConfig,
@@ -137,7 +141,8 @@ public class JeiGuiStarter {
 			modIdHelper,
 			ingredientVisibility,
 			colorHelper,
-			toggleState
+			toggleState,
+			searchStringCache
 		);
 		ingredientManager.registerIngredientListener(ingredientFilter);
 		ingredientVisibility.registerListener(ingredientFilter);
@@ -259,5 +264,23 @@ public class JeiGuiStarter {
 			clientInputHandler,
 			resourceReloadHandler
 		);
+	}
+
+	private static SearchStringCache createSearchStringCache(
+		List<IListElementInfo<?>> ingredientList
+	) {
+		Minecraft minecraft = Minecraft.getInstance();
+		String locale = minecraft.options.languageCode;
+
+		List<String> resourceIds = new ArrayList<>(ingredientList.size());
+		for (IListElementInfo<?> info : ingredientList) {
+			resourceIds.add(info.getResourceLocation().toString());
+		}
+
+		String cacheKey = SearchStringCache.computeCacheKey(resourceIds, locale);
+		LOGGER.info("Search string cache key: {} (ingredients={}, locale={})", cacheKey.substring(0, 16), resourceIds.size(), locale);
+		SearchStringCache cache = new SearchStringCache(cacheKey);
+		cache.load();
+		return cache;
 	}
 }
