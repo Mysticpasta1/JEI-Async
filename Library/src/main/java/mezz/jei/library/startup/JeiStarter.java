@@ -38,7 +38,9 @@ import mezz.jei.library.recipes.RecipeManager;
 import mezz.jei.library.runtime.JeiHelpers;
 import mezz.jei.library.runtime.JeiRuntime;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.core.RegistryAccess;
+import net.minecraft.sounds.SoundEvents;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -160,6 +162,7 @@ public final class JeiStarter {
 		Internal.setRuntime(jeiRuntime);
 
 		totalTime.stop();
+		playLoadCompleteSound();
 	}
 
 	/**
@@ -192,7 +195,18 @@ public final class JeiStarter {
 			Internal.setRuntime(jeiRuntime);
 			Internal.setLoadingProgress(null);
 			LOGGER.info("JEI has finished background loading and is now available.");
+			playLoadCompleteSound();
 		});
+	}
+
+	private static void playLoadCompleteSound() {
+		try {
+			Minecraft minecraft = Minecraft.getInstance();
+			LOGGER.info("Playing JEI load complete sound");
+			minecraft.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.EXPERIENCE_ORB_PICKUP, 1.0F));
+		} catch (Exception e) {
+			LOGGER.error("Failed to play load complete sound", e);
+		}
 	}
 
 	/**
