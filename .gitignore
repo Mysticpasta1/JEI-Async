@@ -34,5 +34,6 @@ changelog.html
 Changelog/changelog.md
 /**/bin/
 .claude/
+.serena/
 CLAUDE.md
 client-jvm-flags.txt
