@@ -104,6 +104,10 @@ public class IngredientFilter implements
 		});
 
 		clientToggleState.addEditModeToggleListener(this);
+
+		// Pre-build the sorted ingredient list cache on the current thread (background thread during async loading)
+		// to avoid a main-thread freeze when the user first opens their inventory.
+		getElements();
 	}
 
 	private static IElementSearch createElementSearch(IClientConfig clientConfig, ElementPrefixParser elementPrefixParser) {

@@ -191,8 +191,8 @@ public final class JeiStarter {
 				Internal.setLoadingProgress(null);
 				return;
 			}
-			PluginCaller.callOnPlugins("Sending Runtime", plugins, p -> p.onRuntimeAvailable(jeiRuntime));
 			Internal.setRuntime(jeiRuntime);
+			PluginCaller.callOnPlugins("Sending Runtime", plugins, p -> p.onRuntimeAvailable(jeiRuntime));
 			Internal.setLoadingProgress(null);
 			LOGGER.info("JEI has finished background loading and is now available.");
 			playLoadCompleteSound();

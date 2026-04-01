@@ -98,7 +98,7 @@ public class RecipeManagerInternal {
 			ingredientManager,
 			recipeTypeDataMap,
 			recipeMaps,
-			this::ensureIndexReady
+			this::isIndexReady
 		);
 		this.pluginManager = new PluginManager(internalRecipeManagerPlugin);
 	}
@@ -194,11 +194,12 @@ public class RecipeManagerInternal {
 	}
 
 	/**
-	 * Block until the recipe index is ready.
+	 * Check if the recipe index is ready without blocking.
 	 * Called by InternalRecipeManagerPlugin before focus-based queries.
+	 * Returns true if the index is built and ready for queries.
 	 */
-	public void ensureIndexReady() {
-		indexBuildFuture.join();
+	public boolean isIndexReady() {
+		return indexBuildFuture.isDone();
 	}
 
 	private record PendingRecipeEntry<T>(

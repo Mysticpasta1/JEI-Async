@@ -4,6 +4,7 @@ import mezz.jei.api.IModPlugin;
 import mezz.jei.api.JeiPlugin;
 import mezz.jei.api.constants.ModIds;
 import mezz.jei.api.registration.IRuntimeRegistration;
+import mezz.jei.api.runtime.IJeiRuntime;
 import mezz.jei.gui.startup.ResourceReloadHandler;
 import mezz.jei.neoforge.events.RuntimeEventSubscriptions;
 import mezz.jei.neoforge.startup.EventRegistration;
@@ -21,6 +22,7 @@ import java.util.Optional;
 public class NeoForgeGuiPlugin implements IModPlugin {
 	private static final Logger LOGGER = LogManager.getLogger();
 	private static @Nullable ResourceReloadHandler resourceReloadHandler;
+	private @Nullable JeiEventHandlers pendingEventHandlers;
 
 	private final RuntimeEventSubscriptions runtimeSubscriptions = new RuntimeEventSubscriptions(NeoForge.EVENT_BUS);
 
@@ -39,13 +41,25 @@ public class NeoForgeGuiPlugin implements IModPlugin {
 		JeiEventHandlers eventHandlers = JeiGuiStarter.start(registration);
 		resourceReloadHandler = eventHandlers.resourceReloadHandler();
 
-		EventRegistration.registerEvents(runtimeSubscriptions, eventHandlers);
+		// Defer event registration to onRuntimeAvailable to prevent a race condition
+		// during async loading: event handlers registered here on the background thread
+		// would fire on the render thread before Internal.setRuntime() is called, causing a crash.
+		this.pendingEventHandlers = eventHandlers;
+	}
+
+	@Override
+	public void onRuntimeAvailable(IJeiRuntime jeiRuntime) {
+		if (pendingEventHandlers != null) {
+			EventRegistration.registerEvents(runtimeSubscriptions, pendingEventHandlers);
+			pendingEventHandlers = null;
+		}
 	}
 
 	@Override
 	public void onRuntimeUnavailable() {
 		LOGGER.info("Stopping JEI GUI");
 		runtimeSubscriptions.clear();
+		pendingEventHandlers = null;
 		resourceReloadHandler = null;
 	}
 
