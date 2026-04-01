@@ -9,12 +9,16 @@ import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
 import java.io.Reader;
 import java.io.Writer;
 import java.lang.reflect.Type;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.zip.GZIPInputStream;
+import java.util.zip.GZIPOutputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -31,7 +35,8 @@ import java.util.concurrent.CompletableFuture;
  */
 public class SearchStringCache {
 	private static final Logger LOGGER = LogManager.getLogger();
-	private static final String CACHE_FILE_NAME = "search_string_cache.json";
+	private static final String CACHE_FILE_NAME = "search_string_cache.json.gz";
+	private static final String LEGACY_CACHE_FILE_NAME = "search_string_cache.json";
 	private static final int FORMAT_VERSION = 1;
 	private static final Gson GSON = new GsonBuilder().create();
 	private static final Type DATA_TYPE = new TypeToken<Map<String, Map<String, List<String>>>>() {}.getType();
@@ -48,6 +53,13 @@ public class SearchStringCache {
 		Path configDir = Services.PLATFORM.getConfigHelper().createJeiConfigDir();
 		this.cacheFile = configDir.resolve(CACHE_FILE_NAME);
 		this.cacheKey = cacheKey;
+		deleteLegacyCacheFile(configDir);
+	}
+
+	private static void deleteLegacyCacheFile(Path configDir) {
+		try {
+			Files.deleteIfExists(configDir.resolve(LEGACY_CACHE_FILE_NAME));
+		} catch (IOException ignored) {}
 	}
 
 	/**
@@ -60,7 +72,7 @@ public class SearchStringCache {
 			return false;
 		}
 
-		try (Reader reader = Files.newBufferedReader(cacheFile, StandardCharsets.UTF_8)) {
+		try (Reader reader = new InputStreamReader(new GZIPInputStream(Files.newInputStream(cacheFile)), StandardCharsets.UTF_8)) {
 			CacheFile cache = GSON.fromJson(reader, CacheFile.class);
 			if (cache == null || cache.formatVersion != FORMAT_VERSION) {
 				LOGGER.info("Search string cache format version mismatch, rebuilding");
@@ -151,7 +163,7 @@ public class SearchStringCache {
 				if (parent != null) {
 					Files.createDirectories(parent);
 				}
-				try (Writer writer = Files.newBufferedWriter(cacheFile, StandardCharsets.UTF_8)) {
+				try (Writer writer = new OutputStreamWriter(new GZIPOutputStream(Files.newOutputStream(cacheFile)), StandardCharsets.UTF_8)) {
 					GSON.toJson(cache, writer);
 				}
 				LOGGER.info("Saved search string cache with {} ingredients", dataToSave.size());
