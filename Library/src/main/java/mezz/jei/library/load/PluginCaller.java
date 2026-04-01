@@ -123,11 +123,11 @@ public class PluginCaller {
 		LOGGER.info("{}...", title);
 		Stopwatch stopwatch = Stopwatch.createStarted();
 
-		// Separate into known-incompatible and async-capable plugins
+		// Separate into known-incompatible (for this phase) and async-capable plugins
 		List<IModPlugin> incompatiblePlugins = new ArrayList<>();
 		List<IModPlugin> asyncPlugins = new ArrayList<>();
 		for (IModPlugin plugin : plugins) {
-			if (store.isIncompatible(plugin)) {
+			if (store.isIncompatible(plugin, title)) {
 				incompatiblePlugins.add(plugin);
 			} else {
 				asyncPlugins.add(plugin);
@@ -149,7 +149,7 @@ public class PluginCaller {
 						throw e;
 					}
 					LOGGER.warn("{} - plugin {} failed on background thread, will retry on main thread", title, pluginUid, e);
-					store.markIncompatible(plugin);
+					store.markIncompatible(plugin, title);
 					newlyFailed.add(plugin);
 				}
 			}
@@ -160,7 +160,7 @@ public class PluginCaller {
 			mainThreadPlugins.addAll(newlyFailed);
 
 			if (!mainThreadPlugins.isEmpty()) {
-				if (incompatiblePlugins.size() > 0) {
+				if (!incompatiblePlugins.isEmpty()) {
 					LOGGER.info("{} - running {} known-incompatible plugins on main thread (batched)", title, incompatiblePlugins.size());
 				}
 				executeOnMainThreadBlocking(() -> {
