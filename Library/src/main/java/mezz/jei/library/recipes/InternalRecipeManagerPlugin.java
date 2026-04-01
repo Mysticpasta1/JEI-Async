@@ -20,19 +20,23 @@ public class InternalRecipeManagerPlugin implements IRecipeManagerPlugin {
 	private final IIngredientManager ingredientManager;
 	private final RecipeTypeDataMap recipeCategoriesMap;
 	private final EnumMap<RecipeIngredientRole, RecipeMap> recipeMaps;
+	private final Runnable ensureIndexReady;
 
 	public InternalRecipeManagerPlugin(
 		IIngredientManager ingredientManager,
 		RecipeTypeDataMap recipeCategoriesMap,
-		EnumMap<RecipeIngredientRole, RecipeMap> recipeMaps
+		EnumMap<RecipeIngredientRole, RecipeMap> recipeMaps,
+		Runnable ensureIndexReady
 	) {
 		this.ingredientManager = ingredientManager;
 		this.recipeCategoriesMap = recipeCategoriesMap;
 		this.recipeMaps = recipeMaps;
+		this.ensureIndexReady = ensureIndexReady;
 	}
 
 	@Override
 	public <V> List<RecipeType<?>> getRecipeTypes(IFocus<V> focus) {
+		ensureIndexReady.run();
 		focus = Focus.checkOne(focus, ingredientManager);
 		ITypedIngredient<V> ingredient = focus.getTypedValue();
 		RecipeIngredientRole role = focus.getRole();
@@ -43,6 +47,7 @@ public class InternalRecipeManagerPlugin implements IRecipeManagerPlugin {
 
 	@Override
 	public <T, V> List<T> getRecipes(IRecipeCategory<T> recipeCategory, IFocus<V> focus) {
+		ensureIndexReady.run();
 		focus = Focus.checkOne(focus, ingredientManager);
 		ITypedIngredient<V> ingredient = focus.getTypedValue();
 		RecipeIngredientRole role = focus.getRole();

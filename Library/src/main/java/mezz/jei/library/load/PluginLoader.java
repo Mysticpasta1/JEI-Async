@@ -246,7 +246,10 @@ public final class PluginLoader {
 		RecipeRegistration recipeRegistration = new RecipeRegistration(jeiHelpers, ingredientManager, recipeManagerInternal);
 		callPlugins("Registering recipes", plugins, p -> p.registerRecipes(recipeRegistration), useAsyncFallback, incompatiblePluginStore);
 
-		recipeManagerInternal.compact();
+		// Start building recipe index in background, overlapping with GUI construction.
+		// Index maps ingredients to recipes for focus-based lookups.
+		// Queries that need the index will block until it completes.
+		recipeManagerInternal.buildRecipeIndexAsync();
 
 		return new RecipeManager(recipeManagerInternal, ingredientManager, recipeCategoryDecorators, recipeButtonControllerFactories);
 	}

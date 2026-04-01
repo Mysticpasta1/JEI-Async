@@ -32,6 +32,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Stream;
 
 public class RecipeManagerInternal {
@@ -46,6 +47,9 @@ public class RecipeManagerInternal {
 	private final PluginManager pluginManager;
 	private final Set<RecipeType<?>> hiddenRecipeTypes = new HashSet<>();
 	private final IIngredientVisibility ingredientVisibility;
+	private List<PendingRecipeEntry<?>> pendingRecipes = new ArrayList<>();
+	private volatile boolean deferIndexing = true;
+	private volatile CompletableFuture<Void> indexBuildFuture = CompletableFuture.completedFuture(null);
 
 	@Nullable
 	@Unmodifiable
@@ -93,7 +97,8 @@ public class RecipeManagerInternal {
 		IRecipeManagerPlugin internalRecipeManagerPlugin = new InternalRecipeManagerPlugin(
 			ingredientManager,
 			recipeTypeDataMap,
-			recipeMaps
+			recipeMaps,
+			this::ensureIndexReady
 		);
 		this.pluginManager = new PluginManager(internalRecipeManagerPlugin);
 	}
@@ -108,48 +113,99 @@ public class RecipeManagerInternal {
 		IRecipeCategory<T> recipeCategory = recipeTypeData.getRecipeCategory();
 		Set<T> hiddenRecipes = recipeTypeData.getHiddenRecipes();
 
-		List<T> addedRecipes = new ArrayList<>(recipes.size());
+		List<T> validRecipes = new ArrayList<>(recipes.size());
 		for (T recipe : recipes) {
-			if (addRecipe(recipeCategory, recipe, hiddenRecipes)) {
-				addedRecipes.add(recipe);
+			if (hiddenRecipes.contains(recipe)) {
+				if (LOGGER.isDebugEnabled()) {
+					String recipeInfo = RecipeDebugUtil.getDebugInfoFromRecipe(recipe, recipeCategory, ingredientManager);
+					LOGGER.debug("Recipe not added because it is hidden: {}", recipeInfo);
+				}
+				continue;
 			}
+			if (!recipeCategory.isHandled(recipe)) {
+				if (LOGGER.isDebugEnabled()) {
+					String recipeInfo = RecipeDebugUtil.getDebugInfoFromRecipe(recipe, recipeCategory, ingredientManager);
+					LOGGER.debug("Recipe not added because the recipe category cannot handle it: {}", recipeInfo);
+				}
+				continue;
+			}
+			validRecipes.add(recipe);
 		}
 
-		if (!addedRecipes.isEmpty()) {
-			recipeTypeData.addRecipes(addedRecipes);
+		if (!validRecipes.isEmpty()) {
+			recipeTypeData.addRecipes(validRecipes);
+			if (deferIndexing) {
+				pendingRecipes.add(new PendingRecipeEntry<>(recipeCategory, recipeType, validRecipes));
+			} else {
+				// After index building started, index recipes immediately
+				indexRecipeEntry(new PendingRecipeEntry<>(recipeCategory, recipeType, validRecipes));
+			}
 			recipeCategoriesVisibleCache = null;
 		}
 	}
 
-	private <T> boolean addRecipe(IRecipeCategory<T> recipeCategory, T recipe, Set<T> hiddenRecipes) {
-		RecipeType<T> recipeType = recipeCategory.getRecipeType();
-		if (hiddenRecipes.contains(recipe)) {
-			if (LOGGER.isDebugEnabled()) {
-				String recipeInfo = RecipeDebugUtil.getDebugInfoFromRecipe(recipe, recipeCategory, ingredientManager);
-				LOGGER.debug("Recipe not added because it is hidden: {}", recipeInfo);
-			}
-			return false;
-		}
-		if (!recipeCategory.isHandled(recipe)) {
-			if (LOGGER.isDebugEnabled()) {
-				String recipeInfo = RecipeDebugUtil.getDebugInfoFromRecipe(recipe, recipeCategory, ingredientManager);
-				LOGGER.debug("Recipe not added because the recipe category cannot handle it: {}", recipeInfo);
-			}
-			return false;
-		}
-		IIngredientSupplier ingredientSupplier = IngredientSupplierHelper.getIngredientSupplier(recipe, recipeCategory, ingredientManager);
+	/**
+	 * Start building recipe index in background.
+	 * The index maps ingredients to recipes for focus-based lookups.
+	 * This runs in parallel with GUI building for faster startup.
+	 */
+	public void buildRecipeIndexAsync() {
+		this.indexBuildFuture = CompletableFuture.runAsync(this::buildRecipeIndex)
+			.whenComplete((result, error) -> {
+				if (error != null) {
+					LOGGER.error("Recipe index building failed!", error);
+				}
+			});
+	}
 
-		try {
-			for (RecipeMap recipeMap : recipeMaps.values()) {
-				recipeMap.addRecipe(recipeType, recipe, ingredientSupplier);
+	private void buildRecipeIndex() {
+		// Take a snapshot and stop deferring so any new addRecipes() calls index immediately
+		List<PendingRecipeEntry<?>> snapshot = pendingRecipes;
+		pendingRecipes = new ArrayList<>();
+		deferIndexing = false;
+
+		LOGGER.info("Building recipe index ({} batches)...", snapshot.size());
+		com.google.common.base.Stopwatch stopwatch = com.google.common.base.Stopwatch.createStarted();
+
+		int totalRecipes = 0;
+		for (PendingRecipeEntry<?> entry : snapshot) {
+			totalRecipes += entry.recipes.size();
+			indexRecipeEntry(entry);
+		}
+		recipeMaps.values().forEach(RecipeMap::compact);
+
+		LOGGER.info("Building recipe index took {} ({} recipes indexed)",
+			mezz.jei.core.util.TimeUtil.toHumanString(stopwatch.elapsed()), totalRecipes);
+	}
+
+	private <T> void indexRecipeEntry(PendingRecipeEntry<T> entry) {
+		for (T recipe : entry.recipes) {
+			try {
+				IIngredientSupplier ingredientSupplier = IngredientSupplierHelper.getIngredientSupplier(
+					recipe, entry.category, ingredientManager);
+				for (RecipeMap recipeMap : recipeMaps.values()) {
+					recipeMap.addRecipe(entry.recipeType, recipe, ingredientSupplier);
+				}
+			} catch (RuntimeException | LinkageError e) {
+				String recipeInfo = RecipeDebugUtil.getDebugInfoFromRecipe(recipe, entry.category, ingredientManager);
+				LOGGER.error("Found a broken recipe during index building: {}\n", recipeInfo, e);
 			}
-			return true;
-		} catch (RuntimeException | LinkageError e) {
-			String recipeInfo = RecipeDebugUtil.getDebugInfoFromRecipe(recipe, recipeCategory, ingredientManager);
-			LOGGER.error("Found a broken recipe, failed to addRecipe: {}\n", recipeInfo, e);
-			return false;
 		}
 	}
+
+	/**
+	 * Block until the recipe index is ready.
+	 * Called by InternalRecipeManagerPlugin before focus-based queries.
+	 */
+	public void ensureIndexReady() {
+		indexBuildFuture.join();
+	}
+
+	private record PendingRecipeEntry<T>(
+		IRecipeCategory<T> category,
+		RecipeType<T> recipeType,
+		List<T> recipes
+	) {}
 
 	public boolean isCategoryHidden(IRecipeCategory<?> recipeCategory, IFocusGroup focuses) {
 		// hide the category if it has been explicitly hidden
