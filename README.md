@@ -1,59 +1,61 @@
-[![Jenkins](https://img.shields.io/jenkins/build?jobUrl=https://ci.blamejared.com/job/mezz/job/jei/job/1.20/&style=?style=plastic)](https://ci.blamejared.com/job/mezz/job/jei/job/1.20/) [![](http://cf.way2muchnoise.eu/full_jei_downloads.svg)](https://minecraft.curseforge.com/projects/jei) [![Discord](https://img.shields.io/discord/358816755646332941.svg?colorB=7289DA&logo=data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHYAAABWAgMAAABnZYq0AAAACVBMVEUAAB38%2FPz%2F%2F%2F%2Bm8P%2F9AAAAAXRSTlMAQObYZgAAAAFiS0dEAIgFHUgAAAAJcEhZcwAACxMAAAsTAQCanBgAAAAHdElNRQfhBxwQJhxy2iqrAAABoElEQVRIx7WWzdGEIAyGgcMeKMESrMJ6rILZCiiBg4eYKr%2Fd1ZAfgXFm98sJfAyGNwno3G9sLucgYGpQ4OGVRxQTREMDZjF7ILSWjoiHo1n%2BE03Aw8p7CNY5IhkYd%2F%2F6MtO3f8BNhR1QWnarCH4tr6myl0cWgUVNcfMcXACP1hKrGMt8wcAyxide7Ymcgqale7hN6846uJCkQxw6GG7h2MH4Czz3cLqD1zHu0VOXMfZjHLoYvsdd0Q7ZvsOkafJ1P4QXxrWFd14wMc60h8JKCbyQvImzlFjyGoZTKzohwWR2UzSONHhYXBQOaKKsySsahwGGDnb%2FiYPJw22sCqzirSULYy1qtHhXGbtgrM0oagBV4XiTJok3GoLoDNH8ooTmBm7ZMsbpFzi2bgPGoXWXME6XT%2BRJ4GLddxJ4PpQy7tmfoU2HPN6cKg%2BledKHBKlF8oNSt5w5g5o8eXhu1IOlpl5kGerDxIVT%2BztzKepulD8utXqpChamkzzuo7xYGk%2FkpSYuviLXun5bzdRf0Krejzqyz7Z3p0I1v2d6HmA07dofmS48njAiuMgAAAAASUVORK5CYII%3D)](https://discord.gg/sCQcWU2)
+# JEI-Optimized
 
-# JustEnoughItems (JEI)
-[JustEnoughItems](https://minecraft.curseforge.com/projects/jei) is an Item and Recipe viewing mod for Minecraft with a focus on stability, performance, and ease of use.
+A performance-optimized fork of [JustEnoughItems (JEI)](https://github.com/mezz/JustEnoughItems) for Minecraft 1.21.1 (NeoForge).
 
-This means:
- * just items and recipes
- * clean API for developers
- * not a coremod – no dependencies other than Forge.
+Based on the async loading work from [JEI-Async](https://github.com/Mysticpasta1/JEI-Async).
 
-## JEI-Async
-This is a fork of JEI with **async/background loading** support. JEI loads entirely on a background thread, so joining a world is no longer blocked by JEI initialization. A loading indicator is shown in the top-right corner of the screen while JEI loads.
+## Features
 
-### Performance Tip: Use ZGC
-For large modpacks, JEI's search index building is heavily affected by GC pressure. Switching to ZGC can dramatically reduce loading time (e.g. 39s → 11s in a 300+ mod pack).
+### Background Async Loading
+JEI loads entirely on a background thread instead of blocking the main thread during world join. You can start playing immediately while JEI initializes in the background.
 
-Add these JVM arguments to your launcher:
+- **Auto-fallback**: Plugins incompatible with async loading are automatically detected and re-executed on the main thread, ensuring compatibility with all mods.
+- **Per-phase error isolation**: Incompatible plugins are tracked per registration phase, so a plugin that fails during subtype registration can still succeed in recipe registration.
+- **Batched main-thread execution**: When multiple plugins need main-thread fallback, they are batched together to minimize synchronization overhead.
+
+### Loading Progress Overlay
+A progress overlay is displayed during background loading, showing the current phase (e.g., "Loading ingredients...", "Loading categories & recipes...", "Building runtime...").
+
+### Deferred Recipe Index Building
+Recipe index construction (mapping ingredients to recipes for focus-based lookups) is deferred to a background thread and runs in parallel with GUI construction, significantly reducing visible loading time.
+
+### Non-blocking Recipe Queries
+When the recipe index is still building, recipe lookups return empty results instead of freezing the render thread. An action bar message (`[JEI] Recipe index is still building...`) notifies the player. Once the index is complete, recipes display normally.
+
+### GZIP Search String Cache
+The search string cache file is compressed with GZIP, reducing disk usage from ~7.7MB to ~1.5MB in large modpacks.
+
+### Ingredient List Cache Pre-building
+The sorted ingredient list is pre-built on the background thread during filter construction, reducing the freeze when first opening inventory.
+
+### Load Complete Sound
+An experience orb pickup sound plays when JEI finishes loading.
+
+## Recommended JVM Flags
+
+For large modpacks, JEI's search index building is heavily affected by GC pressure. **ZGC** dramatically reduces loading time (e.g., G1GC: 39s → ZGC: 11s in a 300+ mod pack).
+
 ```
--XX:+UseZGC -XX:+ZGenerational -XX:+AlwaysPreTouch -XX:+DisableExplicitGC
+-XX:+UseZGC -XX:+ZGenerational
 ```
+
 **Important:** Remove any existing G1GC arguments (`-XX:+UseG1GC` and related options) when switching to ZGC.
 
-### [JEI Developer Wiki](https://github.com/mezz/JustEnoughItems/wiki)
+## Installation
 
-# Latest Versions:
+1. Download the latest release JAR
+2. Place it in your `mods/` folder (replace any existing JEI JAR)
+3. Do not run both this mod and standard JEI simultaneously
 
-## 1.21.1
-* [![Maven metadata URL](https://img.shields.io/maven-metadata/v?metadataUrl=https%3A%2F%2Fmaven.blamejared.com%2Fmezz%2Fjei%2Fjei-1.21.1-neoforge%2Fmaven-metadata.xml&label=NeoForge%201.21.1)](https://maven.blamejared.com/mezz/jei/jei-1.21.1-neoforge/maven-metadata.xml)
-* [![Maven metadata URL](https://img.shields.io/maven-metadata/v?metadataUrl=https%3A%2F%2Fmaven.blamejared.com%2Fmezz%2Fjei%2Fjei-1.21.1-fabric%2Fmaven-metadata.xml&label=Fabric%201.21.1)](https://maven.blamejared.com/mezz/jei/jei-1.21.1-fabric/maven-metadata.xml)
-* [![Maven metadata URL](https://img.shields.io/maven-metadata/v?metadataUrl=https%3A%2F%2Fmaven.blamejared.com%2Fmezz%2Fjei%2Fjei-1.21.1-forge%2Fmaven-metadata.xml&label=Forge%201.21.1)](https://maven.blamejared.com/mezz/jei/jei-1.21.1-forge/maven-metadata.xml)
+## Building from Source
 
-## 1.21
-* [![Maven metadata URL](https://img.shields.io/maven-metadata/v?metadataUrl=https%3A%2F%2Fmaven.blamejared.com%2Fmezz%2Fjei%2Fjei-1.21-neoforge%2Fmaven-metadata.xml&label=NeoForge%201.21)](https://maven.blamejared.com/mezz/jei/jei-1.21-neoforge/maven-metadata.xml)
-* [![Maven metadata URL](https://img.shields.io/maven-metadata/v?metadataUrl=https%3A%2F%2Fmaven.blamejared.com%2Fmezz%2Fjei%2Fjei-1.21-fabric%2Fmaven-metadata.xml&label=Fabric%201.21)](https://maven.blamejared.com/mezz/jei/jei-1.21-fabric/maven-metadata.xml)
-* [![Maven metadata URL](https://img.shields.io/maven-metadata/v?metadataUrl=https%3A%2F%2Fmaven.blamejared.com%2Fmezz%2Fjei%2Fjei-1.21-forge%2Fmaven-metadata.xml&label=Forge%201.21)](https://maven.blamejared.com/mezz/jei/jei-1.21-forge/maven-metadata.xml)
+```bash
+./gradlew :NeoForge:build -x test
+```
 
-## 1.20.1
-* [![Maven metadata URL](https://img.shields.io/maven-metadata/v?metadataUrl=https%3A%2F%2Fmaven.blamejared.com%2Fmezz%2Fjei%2Fjei-1.20.1-fabric%2Fmaven-metadata.xml&label=Fabric%201.20.1)](https://maven.blamejared.com/mezz/jei/jei-1.20.1-fabric/maven-metadata.xml)
-* [![Maven metadata URL](https://img.shields.io/maven-metadata/v?metadataUrl=https%3A%2F%2Fmaven.blamejared.com%2Fmezz%2Fjei%2Fjei-1.20.1-forge%2Fmaven-metadata.xml&label=Forge%201.20.1)](https://maven.blamejared.com/mezz/jei/jei-1.20.1-forge/maven-metadata.xml)
+The output JAR will be in `NeoForge/build/libs/`.
 
-## 1.19.2
-* [![Maven metadata URL](https://img.shields.io/maven-metadata/v?metadataUrl=https%3A%2F%2Fmaven.blamejared.com%2Fmezz%2Fjei%2Fjei-1.19.2-fabric%2Fmaven-metadata.xml&label=Fabric%201.19.2)](https://maven.blamejared.com/mezz/jei/jei-1.19.2-fabric/maven-metadata.xml)
-* [![Maven metadata URL](https://img.shields.io/maven-metadata/v?metadataUrl=https%3A%2F%2Fmaven.blamejared.com%2Fmezz%2Fjei%2Fjei-1.19.2-forge%2Fmaven-metadata.xml&label=Forge%201.19.2)](https://maven.blamejared.com/mezz/jei/jei-1.19.2-forge/maven-metadata.xml)
+## Credits
 
-## 1.18.2
-* [![Maven metadata URL](https://img.shields.io/maven-metadata/v?metadataUrl=https%3A%2F%2Fmaven.blamejared.com%2Fmezz%2Fjei%2Fjei-1.18.2-fabric%2Fmaven-metadata.xml&label=Fabric%201.18.2)](https://maven.blamejared.com/mezz/jei/jei-1.18.2-fabric/maven-metadata.xml)
-* [![Maven metadata URL](https://img.shields.io/maven-metadata/v?metadataUrl=https%3A%2F%2Fmaven.blamejared.com%2Fmezz%2Fjei%2Fjei-1.18.2-forge%2Fmaven-metadata.xml&label=Forge%201.18.2)](https://maven.blamejared.com/mezz/jei/jei-1.18.2-forge/maven-metadata.xml)
-
-## 1.16.5
-* [![Maven metadata URL](https://img.shields.io/maven-metadata/v?metadataUrl=https%3A%2F%2Fmaven.blamejared.com%2Fmezz%2Fjei%2Fjei-1.16.5%2Fmaven-metadata.xml&label=Forge%201.16.5)](https://maven.blamejared.com/mezz/jei/jei-1.16.5/maven-metadata.xml)
-
-## 1.12.2
-* [![Maven metadata URL](https://img.shields.io/maven-metadata/v?metadataUrl=https%3A%2F%2Fmaven.blamejared.com%2Fmezz%2Fjei%2Fjei_1.12.2%2Fmaven-metadata.xml&label=Forge%201.12.2)](https://maven.blamejared.com/mezz/jei/jei_1.12.2/maven-metadata.xml)
-
-## 1.10.2
-* [![Maven metadata URL](https://img.shields.io/maven-metadata/v?metadataUrl=https%3A%2F%2Fmaven.blamejared.com%2Fmezz%2Fjei%2Fjei_1.10.2%2Fmaven-metadata.xml&label=Forge%201.10.2)](https://maven.blamejared.com/mezz/jei/jei_1.10.2/maven-metadata.xml)
-
-## 1.8.9
-* [![Maven metadata URL](https://img.shields.io/maven-metadata/v?metadataUrl=https%3A%2F%2Fmaven.blamejared.com%2Fmezz%2Fjei%2Fjei_1.8.9%2Fmaven-metadata.xml&label=Forge%201.8.9)](https://maven.blamejared.com/mezz/jei/jei_1.8.9/maven-metadata.xml)
+- [mezz/JustEnoughItems](https://github.com/mezz/JustEnoughItems) — Original JEI
+- [Mysticpasta1/JEI-Async](https://github.com/Mysticpasta1/JEI-Async) — Original async loading implementation for 1.20.1
