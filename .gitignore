@@ -32,3 +32,7 @@ changelog.html
 /**/logs
 /**/runs/
 Changelog/changelog.md
+/**/bin/
+.claude/
+CLAUDE.md
+client-jvm-flags.txt
