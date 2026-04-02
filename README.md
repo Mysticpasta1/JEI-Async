@@ -1,5 +1,7 @@
 # JEI-Optimized
 
+> **Note:** This is a personal experimental project built with [Claude Code](https://claude.com/claude-code). It is not affiliated with or endorsed by the original JEI developers.
+
 A performance-optimized fork of [JustEnoughItems (JEI)](https://github.com/mezz/JustEnoughItems) for Minecraft 1.21.1 (NeoForge).
 
 Based on the async loading work from [JEI-Async](https://github.com/Mysticpasta1/JEI-Async).
