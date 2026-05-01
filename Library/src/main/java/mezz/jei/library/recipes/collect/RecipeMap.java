@@ -11,6 +11,7 @@ import mezz.jei.api.recipe.RecipeIngredientRole;
 import mezz.jei.api.recipe.RecipeType;
 import mezz.jei.api.runtime.IIngredientManager;
 import mezz.jei.common.config.DebugConfig;
+import mezz.jei.core.QuantifiedIntegration.QuantifiedIntegration;
 import mezz.jei.library.ingredients.IIngredientSupplier;
 import org.jetbrains.annotations.UnmodifiableView;
 import org.apache.logging.log4j.LogManager;
@@ -85,15 +86,14 @@ public class RecipeMap {
 	}
 
 	/**
-	 * Add recipe with parallel processing for large ingredient lists.
+	 * Add recipe with QAPI processing for large ingredient lists.
 	 */
 	public <T> void addRecipe(RecipeType<T> recipeType, T recipe, IIngredientSupplier ingredientSupplier) {
 		Collection<ITypedIngredient<?>> ingredients = ingredientSupplier.getIngredients(this.role);
 
 		// Use parallel processing for large ingredient lists, but avoid nested parallelism
 		if (DebugConfig.isParallelSearchEnabled() &&
-			ingredients.size() >= PARALLEL_THRESHOLD &&
-			java.util.concurrent.ForkJoinTask.getPool() == null) {
+			ingredients.size() >= PARALLEL_THRESHOLD) {
 			addRecipeParallel(recipeType, recipe, ingredients);
 		} else {
 			addRecipeSequential(recipeType, recipe, ingredients);
@@ -119,13 +119,13 @@ public class RecipeMap {
 	}
 
 	/**
-	 * Parallel recipe addition (large ingredient lists).
+	 * QAPI recipe addition (large ingredient lists).
 	 */
 	private <T> void addRecipeParallel(RecipeType<T> recipeType, T recipe, Collection<ITypedIngredient<?>> ingredients) {
 		try {
 			// Extract ingredient UIDs in parallel
-			Set<Object> ingredientUids = ingredients.parallelStream()
-				.map(this::getIngredientUidSafe)
+			Set<Object> ingredientUids = QuantifiedIntegration.mapOrdered("jei-recipe-ingredient-uid", ingredients, this::getIngredientUidSafe)
+				.stream()
 				.filter(java.util.Objects::nonNull)
 				.collect(Collectors.toCollection(ConcurrentHashMap::newKeySet));
 

@@ -4,10 +4,12 @@ import mezz.jei.api.runtime.IIngredientManager;
 import mezz.jei.common.config.DebugConfig;
 import mezz.jei.common.config.IClientConfig;
 import mezz.jei.common.config.IngredientSortStage;
+import mezz.jei.core.QuantifiedIntegration.QuantifiedIntegration;
 import mezz.jei.gui.config.IngredientTypeSortingConfig;
 import mezz.jei.gui.config.ModNameSortingConfig;
 
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -21,13 +23,16 @@ public final class IngredientSorter {
 		ModNameSortingConfig modNameSortingConfig,
 		IngredientTypeSortingConfig ingredientTypeSortingConfig,
 		IIngredientManager ingredientManager,
-		List<IListElementInfo<?>> ingredients
+		List<IListElementInfo<?>> ingredients,
+		IngredientSortCache ingredientSortCache
 	) {
+		if (ingredientSortCache != null && ingredientSortCache.apply(ingredients)) {
+			return COMPARE_SORT_INDEX;
+		}
+
 		Set<String> modNames;
 		if (DebugConfig.isAsyncLoadingEnabled()) {
-			modNames = ingredients.parallelStream()
-				.map(IListElementInfo::getModNameForSorting)
-				.collect(Collectors.toSet());
+			modNames = new HashSet<>(QuantifiedIntegration.mapOrdered("jei-sort-mod-names", ingredients, IListElementInfo::getModNameForSorting));
 		} else {
 			modNames = ingredients.stream()
 				.map(IListElementInfo::getModNameForSorting)
@@ -46,7 +51,7 @@ public final class IngredientSorter {
 		// Go through all of the items and set their sorted index.
 		final int size = ingredients.size();
 		if (DebugConfig.isAsyncLoadingEnabled() && size > 1000) {
-			java.util.stream.IntStream.range(0, size).parallel().forEach(i -> {
+			QuantifiedIntegration.forEach("jei-sort-index", java.util.stream.IntStream.range(0, size).boxed().toList(), i -> {
 				IListElementInfo<?> elementInfo = ingredients.get(i);
 				IListElement<?> element = elementInfo.getElement();
 				element.setSortedIndex(i);
@@ -57,6 +62,9 @@ public final class IngredientSorter {
 				IListElement<?> element = elementInfo.getElement();
 				element.setSortedIndex(i);
 			}
+		}
+		if (ingredientSortCache != null) {
+			ingredientSortCache.saveAsync(ingredients);
 		}
 
 		//Now the comparator just uses that index value to order everything.

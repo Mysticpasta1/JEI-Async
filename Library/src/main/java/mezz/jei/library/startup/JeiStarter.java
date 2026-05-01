@@ -16,6 +16,7 @@ import mezz.jei.common.config.file.IConfigSchemaBuilder;
 import mezz.jei.common.platform.Services;
 import mezz.jei.common.util.ErrorUtil;
 import mezz.jei.common.util.RegistryUtil;
+import mezz.jei.core.QuantifiedIntegration.QuantifiedIntegration;
 import mezz.jei.core.util.LoggedTimer;
 import mezz.jei.library.color.ColorHelper;
 import mezz.jei.library.config.ColorNameConfig;
@@ -45,17 +46,11 @@ import org.apache.logging.log4j.Logger;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
 
 public final class JeiStarter {
 	private static final Logger LOGGER = LogManager.getLogger();
-	private static final ExecutorService LOADING_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
-		Thread t = new Thread(r, "JEI Background Loader");
-		t.setDaemon(true);
-		return t;
-	});
+
 	private static final String EXPECTED_VERSION = "15.20.0.130-async-24"; // Current JEI-Async version
 
 	private final StartData data;
@@ -157,7 +152,7 @@ public final class JeiStarter {
 		loadingState = LoadingState.INITIALIZING;
 		LOGGER.info("Starting JEI background loading...");
 
-		CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
+		CompletableFuture<Void> future = QuantifiedIntegration.runAsync("jei-background-loading", () -> {
 			try {
 				doLoadingAsync();
 			} catch (Exception e) {
@@ -165,7 +160,7 @@ public final class JeiStarter {
 					LOGGER.error("JEI background loading failed catastrophically", e);
 				}
 			}
-		}, LOADING_EXECUTOR);
+		});
 		loadingFuture.set(future);
 	}
 

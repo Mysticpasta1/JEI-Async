@@ -5,6 +5,7 @@ import mezz.jei.api.ingredients.ITypedIngredient;
 import mezz.jei.api.ingredients.subtypes.UidContext;
 import mezz.jei.api.runtime.IIngredientManager;
 import mezz.jei.common.config.DebugConfig;
+import mezz.jei.core.QuantifiedIntegration.QuantifiedIntegration;
 import mezz.jei.core.search.CombinedSearchables;
 import mezz.jei.core.search.ISearchStorage;
 import mezz.jei.core.search.ISearchable;
@@ -152,19 +153,20 @@ public class ElementSearch implements IElementSearch {
 	}
 
 	private void addAllParallel(Collection<IListElementInfo<?>> infos, IIngredientManager ingredientManager) {
-		infos.parallelStream().forEach(info -> {
+		QuantifiedIntegration.forEach("jei-search-uid", infos, info -> {
 			Object uid = getUid(info.getTypedIngredient(), ingredientManager);
 			this.allElements.put(uid, info.getElement());
 		});
 
-		this.prefixedSearchables.values().parallelStream()
-			.filter(p -> p.getMode() != SearchMode.DISABLED)
-			.forEach(prefixedSearchable -> {
-				ISearchStorage<IListElement<?>> storage = prefixedSearchable.getSearchStorage();
-				for (IListElementInfo<?> info : infos) {
-					prefixedSearchable.getStrings(info).forEach(s -> storage.put(s, info.getElement()));
-				}
-			});
+		QuantifiedIntegration.forEach("jei-search-prefix", this.prefixedSearchables.values(), prefixedSearchable -> {
+			if (prefixedSearchable.getMode() == SearchMode.DISABLED) {
+				return;
+			}
+			ISearchStorage<IListElement<?>> storage = prefixedSearchable.getSearchStorage();
+			for (IListElementInfo<?> info : infos) {
+				prefixedSearchable.getStrings(info).forEach(s -> storage.put(s, info.getElement()));
+			}
+		});
 	}
 
 	@Override

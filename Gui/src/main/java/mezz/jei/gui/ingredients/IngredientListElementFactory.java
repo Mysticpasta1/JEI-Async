@@ -5,6 +5,7 @@ import mezz.jei.api.ingredients.IIngredientType;
 import mezz.jei.api.ingredients.ITypedIngredient;
 import mezz.jei.api.runtime.IIngredientManager;
 import mezz.jei.common.config.DebugConfig;
+import mezz.jei.core.QuantifiedIntegration.QuantifiedIntegration;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -26,9 +27,11 @@ public final class IngredientListElementFactory {
 		Collection<IIngredientType<?>> ingredientTypes = ingredientManager.getRegisteredIngredientTypes();
 
 		if (DebugConfig.isAsyncLoadingEnabled()) {
-			LOGGER.info("Building ingredient list in parallel...");
-			return ingredientTypes.parallelStream()
-				.flatMap(ingredientType -> createBaseListForType(ingredientManager, ingredientType, modIdHelper).stream())
+			LOGGER.info("Building ingredient list through Quantified API...");
+			return QuantifiedIntegration.mapOrdered("jei-ingredient-list-type", ingredientTypes,
+				ingredientType -> createBaseListForType(ingredientManager, ingredientType, modIdHelper))
+				.stream()
+				.flatMap(List::stream)
 				.collect(Collectors.toList());
 		}
 
@@ -60,11 +63,6 @@ public final class IngredientListElementFactory {
 				}
 			} catch (ConcurrentModificationException e) {
 				LOGGER.warn("Caught ConcurrentModificationException while copying ingredients for {}, retrying (attempt {})", ingredientType.getIngredientClass().getSimpleName(), i + 1);
-				try {
-					Thread.sleep(100);
-				} catch (InterruptedException ignored) {
-					Thread.currentThread().interrupt();
-				}
 			}
 		}
 		// Final fallback

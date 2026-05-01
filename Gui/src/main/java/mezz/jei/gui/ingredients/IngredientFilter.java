@@ -11,6 +11,7 @@ import mezz.jei.common.config.DebugConfig;
 import mezz.jei.common.config.IClientConfig;
 import mezz.jei.common.config.IClientToggleState;
 import mezz.jei.common.config.IIngredientFilterConfig;
+import mezz.jei.core.QuantifiedIntegration.QuantifiedIntegration;
 import mezz.jei.gui.filter.IFilterTextSource;
 import mezz.jei.gui.overlay.elements.IElement;
 import mezz.jei.gui.overlay.IIngredientGridSource;
@@ -34,7 +35,6 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -62,7 +62,6 @@ public class IngredientFilter implements
 	@Nullable
 	private volatile List<IElement<?>> ingredientListCached;
 	private final List<SourceListChangedListener> listeners = new ArrayList<>();
-	private final List<CompletableFuture<?>> tasks = Collections.synchronizedList(new ArrayList<>());
 	private volatile boolean closed = false;
 
 	public IngredientFilter(
@@ -109,23 +108,15 @@ public class IngredientFilter implements
 
 		clientToggleState.addEditModeToggleListener(this);
 
-		// Pre-build the sorted ingredient list cache on the current thread (background thread during async loading)
+		// Pre-build the sorted ingredient list cache through QAPI during loading
 		// to avoid a main-thread freeze when the user first opens their inventory.
 		getElements();
-
-		clientToggleState.addEditModeToggleListener(this);
 	}
 
 	@Override
 	public void close() {
-		LOGGER.info("Closing IngredientFilter, cancelling {} tasks", tasks.size());
+		LOGGER.info("Closing IngredientFilter");
 		this.closed = true;
-		synchronized (tasks) {
-			for (CompletableFuture<?> task : tasks) {
-				task.cancel(true);
-			}
-			tasks.clear();
-		}
 	}
 
 	private static IElementSearch createElementSearch(IClientConfig clientConfig, ElementPrefixParser elementPrefixParser) {
@@ -142,15 +133,17 @@ public class IngredientFilter implements
 
 	public synchronized void addIngredients(Collection<IListElementInfo<?>> ingredients) {
 		if (closed) return;
-		// Process hidden states in parallel if the list is large
-		Stream<IListElementInfo<?>> stream = (DebugConfig.isParallelSearchEnabled())
-				? ingredients.parallelStream()
-				: ingredients.stream();
-
-		stream.forEach(i -> {
-			if (closed) return;
-			updateHiddenState(i.getElement());
-		});
+		if (DebugConfig.isParallelSearchEnabled() && ingredients.size() > 1) {
+			QuantifiedIntegration.forEach("jei-hidden-state", ingredients, i -> {
+				if (closed) return;
+				updateHiddenState(i.getElement());
+			});
+		} else {
+			for (IListElementInfo<?> i : ingredients) {
+				if (closed) return;
+				updateHiddenState(i.getElement());
+			}
+		}
 
 		if (closed) return;
 		// Add to search tree in bulk
@@ -239,9 +232,17 @@ public class IngredientFilter implements
 		filterText = filterText.toLowerCase();
 		List<IElement<?>> cached = ingredientListCached;
 		if (cached == null) {
-			cached = getIngredientListUncached(filterText)
+			String taskFilterText = filterText;
+			if (DebugConfig.isAsyncLoadingEnabled()) {
+				cached = QuantifiedIntegration.submit("jei-filter-elements", () -> getIngredientListUncached(taskFilterText)
+						.<IElement<?>>map(IngredientElement::new)
+						.toList())
+					.join();
+			} else {
+				cached = getIngredientListUncached(taskFilterText)
 					.<IElement<?>>map(IngredientElement::new)
 					.toList();
+			}
 			ingredientListCached = cached;
 		}
 		return cached;
@@ -265,20 +266,13 @@ public class IngredientFilter implements
 
 		Stream<IListElement<?>> elementStream;
 		if (searchTokens.isEmpty()) {
-			// Use parallel stream for large ingredient lists when parallel search is enabled
-			// Parallel streams provide better performance with many ingredients
 			Collection<IListElement<?>> allIngredients = this.elementSearch.getAllIngredients();
-			if (DebugConfig.isParallelSearchEnabled() && allIngredients.size() >= 500) {
-				elementStream = allIngredients.parallelStream();
-			} else {
-				elementStream = allIngredients.stream();
-			}
+			elementStream = allIngredients.stream();
 		} else {
-			// Use parallel processing for multi-token searches
 			if (DebugConfig.isParallelSearchEnabled() && searchTokens.size() >= 2) {
-				elementStream = searchTokens.parallelStream()
-						.map(this::getSearchResults)
-						.flatMap(Set::parallelStream)
+				elementStream = QuantifiedIntegration.mapOrdered("jei-filter-token-search", searchTokens, this::getSearchResults)
+						.stream()
+						.flatMap(Set::stream)
 						.distinct();
 			} else {
 				elementStream = searchTokens.stream()
