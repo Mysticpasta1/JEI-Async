@@ -4,6 +4,7 @@ import com.google.common.base.Stopwatch;
 import mezz.jei.api.IAsyncCompatiblePlugin;
 import mezz.jei.api.IModPlugin;
 import mezz.jei.common.config.DebugConfig;
+import mezz.jei.core.QuantifiedIntegration.QuantifiedIntegration;
 import mezz.jei.core.util.TimeUtil;
 import mezz.jei.library.plugins.vanilla.VanillaPlugin;
 import net.minecraft.client.Minecraft;
@@ -17,20 +18,12 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 
 public class PluginCaller {
 	private static final Logger LOGGER = LogManager.getLogger();
-	private static final ExecutorService EXECUTOR = Executors.newCachedThreadPool(r -> {
-		Thread thread = new Thread(r);
-		thread.setName("JEI Plugin Loader");
-		thread.setDaemon(true);
-		return thread;
-	});
 
 	/**
 	 * Route plugin calls to the appropriate method based on whether async fallback is enabled.
@@ -93,7 +86,7 @@ public class PluginCaller {
 		if (!asyncPlugins.isEmpty()) {
 			try (PluginCallerTimer timer = new PluginCallerTimer()) {
 				List<CompletableFuture<Void>> futures = asyncPlugins.stream()
-					.map(plugin -> CompletableFuture.runAsync(() -> {
+					.map(plugin -> QuantifiedIntegration.runAsync("jei-plugin-" + title + "-" + plugin.getPluginUid(), () -> {
 						ResourceLocation pluginUid = plugin.getPluginUid();
 						PluginCallerTimerRunnable runnable = timer.begin(title, pluginUid);
 						try {
@@ -104,7 +97,7 @@ public class PluginCaller {
 						} finally {
 							timer.end(runnable);
 						}
-					}, EXECUTOR))
+					}))
 					.toList();
 
 				// Wait for async plugins to complete (with timeout to prevent hangs)
@@ -168,7 +161,7 @@ public class PluginCaller {
 			// Execute async-capable plugins in parallel on background threads
 			if (!asyncPlugins.isEmpty()) {
 				List<CompletableFuture<Void>> futures = asyncPlugins.stream()
-					.map(plugin -> CompletableFuture.runAsync(() -> {
+					.map(plugin -> QuantifiedIntegration.runAsync("jei-plugin-fallback-" + title + "-" + plugin.getPluginUid(), () -> {
 						ResourceLocation pluginUid = plugin.getPluginUid();
 						PluginCallerTimerRunnable runnable = timer.begin(title, pluginUid);
 						try {
@@ -183,7 +176,7 @@ public class PluginCaller {
 						} finally {
 							timer.end(runnable);
 						}
-					}, EXECUTOR))
+					}))
 					.toList();
 
 				CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();

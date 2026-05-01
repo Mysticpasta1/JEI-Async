@@ -69,5 +69,12 @@ ${modDescription}
     # Side this dependency is applied on - BOTH, CLIENT or SERVER
     side="BOTH"
 
+[[dependencies.jei]]
+    modId="quantified"
+    type="required"
+    versionRange="[${quantifiedVersion},)"
+    ordering="AFTER"
+    side="BOTH"
+
 [modproperties.jei]
     catalogueImageIcon="jei-icon.png"

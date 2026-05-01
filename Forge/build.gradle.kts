@@ -25,7 +25,16 @@ val modGroup: String by extra
 val modId: String by extra
 val modJavaVersion: String by extra
 val parchmentVersionForge: String by extra
+val quantifiedVersion: String by extra
 val modrinthId: String by extra
+
+val quantifiedJars = rootProject.fileTree(rootProject.file("libs")) {
+	include("quantified*omni*${quantifiedVersion}.jar", "quantified-${quantifiedVersion}.jar")
+}.files
+if (quantifiedJars.isEmpty()) {
+	throw GradleException("Missing Quantified API jar in libs (expected quantified*omni*${quantifiedVersion}.jar)")
+}
+val quantifiedJar = quantifiedJars.sortedBy { it.name }.last()
 
 // set by ORG_GRADLE_PROJECT_modrinthToken in Jenkinsfile
 val modrinthToken: String? by project
@@ -70,6 +79,9 @@ java {
 // Hack fix: FG can't resolve deps like lwjgl-freetype-3.3.3-natives-macos-patch.jar without this
 repositories {
 	maven("https://libraries.minecraft.net")
+	flatDir {
+		dirs(rootProject.file("libs"))
+	}
 }
 
 dependencies {
@@ -78,6 +90,7 @@ dependencies {
 		name = "forge",
 		version = "${minecraftVersion}-${forgeVersion}"
 	)
+	implementation(fg.deobf(files(quantifiedJar)))
 	dependencyProjects.forEach {
 		compileOnly(it)
 	}

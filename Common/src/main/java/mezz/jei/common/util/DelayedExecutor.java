@@ -1,12 +1,12 @@
 package mezz.jei.common.util;
 
-import com.google.common.util.concurrent.ThreadFactoryBuilder;
+import mezz.jei.core.QuantifiedIntegration.QuantifiedIntegration;
 import org.jetbrains.annotations.Nullable;
 
 import java.time.Duration;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.concurrent.Future;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 
 final class DelayedExecutor implements IDelayedExecutor {
 	private static @Nullable DelayedExecutor INSTANCE;
@@ -18,22 +18,26 @@ final class DelayedExecutor implements IDelayedExecutor {
 		return INSTANCE;
 	}
 
-	private final ScheduledThreadPoolExecutor service;
+	private final Executor delayedExecutor;
 
 	private DelayedExecutor() {
-		var threadFactory = new ThreadFactoryBuilder()
-			.setNameFormat("JEI Deduplicating Run Executor %d")
-			.build();
-		var service = new ScheduledThreadPoolExecutor(
-			1,
-			threadFactory
+		Executor qapiDelayedExecutor = CompletableFuture.delayedExecutor(
+			0,
+			java.util.concurrent.TimeUnit.MILLISECONDS,
+			QuantifiedIntegration.executor("jei-delayed-run")
 		);
-		service.setRemoveOnCancelPolicy(true);
-		this.service = service;
+		this.delayedExecutor = qapiDelayedExecutor;
 	}
 
 	@Override
 	public Future<?> schedule(Runnable command, Duration delay) {
-		return service.schedule(command, delay.toMillis(), TimeUnit.MILLISECONDS);
+		return CompletableFuture.runAsync(
+			command,
+			CompletableFuture.delayedExecutor(
+				delay.toMillis(),
+				java.util.concurrent.TimeUnit.MILLISECONDS,
+				delayedExecutor
+			)
+		);
 	}
 }
