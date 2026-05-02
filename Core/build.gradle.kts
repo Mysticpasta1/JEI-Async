@@ -130,7 +130,9 @@ tasks.withType<JavaCompile> {
     }
 }
 
-val sourcesJarTask = tasks.named<Jar>("sourcesJar")
+val sourcesJarTask = tasks.named<Jar>("sourcesJar") {
+	dependsOn(generateQuantifiedIntegrationBuildInfo)
+}
 
 val baseArchivesName = "${modId}-${minecraftVersion}-core"
 base {

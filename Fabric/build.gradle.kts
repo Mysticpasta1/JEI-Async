@@ -186,6 +186,7 @@ tasks.jar {
 }
 
 tasks.named<Jar>("sourcesJar") {
+    dependsOn(":Core:generateQuantifiedIntegrationBuildInfo")
     from(sourceSets.main.get().allJava)
     for (p in dependencyProjects) {
         from(p.dependencyProject.sourceSets.main.get().allJava)
