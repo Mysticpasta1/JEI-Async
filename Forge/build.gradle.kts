@@ -93,7 +93,6 @@ dependencies {
 	)
 	implementation(fg.deobf(files(quantifiedJar)))
 	implementation(fg.deobf("curse.maven:projecte-226410:4901949"))
-	compileOnly(fg.deobf("curse.maven:ldlib-626676:7652228"))
 	dependencyProjects.forEach {
 		implementation(it)
 	}

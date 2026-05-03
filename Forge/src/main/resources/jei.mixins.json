@@ -4,8 +4,7 @@
   "package": "mezz.jei.forge.mixin",
   "compatibilityLevel": "JAVA_17",
   "mixins": [
-    "IEMCProxyMixin",
-    "SceneWidgetMixin"
+    "IEMCProxyMixin"
   ],
   "injectors": {
     "defaultRequire": 1

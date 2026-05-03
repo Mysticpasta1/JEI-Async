@@ -26,6 +26,7 @@ import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 public class SearchStringCache {
 	private static final Logger LOGGER = LogManager.getLogger();
