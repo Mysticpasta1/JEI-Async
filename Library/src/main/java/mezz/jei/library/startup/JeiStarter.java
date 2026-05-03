@@ -52,7 +52,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 public final class JeiStarter {
 	private static final Logger LOGGER = LogManager.getLogger();
-	private static final String EXPECTED_VERSION = "19.27.0.340-async-10";
+	private static final String EXPECTED_VERSION = "19.27.0.340-async-9";
 
 	private final StartData data;
 	private List<IModPlugin> plugins;

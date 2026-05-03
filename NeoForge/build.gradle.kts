@@ -157,7 +157,6 @@ tasks.jar {
 }
 
 val sourcesJarTask = tasks.named<Jar>("sourcesJar") {
-	dependsOn(project(":Core").tasks.named("generateQuantifiedIntegrationBuildInfo"))
 	from(sourceSets.main.get().allJava)
 	for (p in dependencyProjects) {
 		from(p.sourceSets.main.get().allJava)

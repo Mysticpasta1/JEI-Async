@@ -1,5 +1,6 @@
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.api.tasks.testing.logging.TestLogEvent
+import mezz.jei.build.GenerateQuantifiedIntegrationBuildInfoTask
 
 plugins {
     id("idea")
@@ -64,35 +65,11 @@ dependencies {
 }
 
 val quantifiedIntegrationGeneratedSources = layout.buildDirectory.dir("generated/sources/quantifiedIntegration/java")
-
-val generateQuantifiedIntegrationBuildInfo by tasks.registering {
-	inputs.property("modId", providers.gradleProperty("modId"))
-	inputs.property("modName", providers.gradleProperty("modName"))
-	inputs.property("quantifiedIntegrationDisplayName", providers.gradleProperty("quantifiedIntegrationDisplayName"))
-    inputs.property("specificationVersion", providers.gradleProperty("specificationVersion"))
-    outputs.dir(quantifiedIntegrationGeneratedSources)
-    val outDir = quantifiedIntegrationGeneratedSources
-    doLast {
-        val outputFile = outDir.get()
-            .file("mezz/jei/core/QuantifiedIntegration/QuantifiedIntegrationBuildInfo.java")
-            .asFile
-        outputFile.parentFile.mkdirs()
-        val modId = inputs.properties["modId"] as String
-        val displayName = inputs.properties["quantifiedIntegrationDisplayName"] as String
-        val version = inputs.properties["specificationVersion"] as String
-        outputFile.writeText("""
-            package mezz.jei.core.QuantifiedIntegration;
-
-            public final class QuantifiedIntegrationBuildInfo {
-                public static final String MOD_ID = "$modId";
-                public static final String DISPLAY_NAME = "$displayName";
-            	public static final String VERSION = "$version";
-
-            	private QuantifiedIntegrationBuildInfo() {
-            	}
-            }
-        """.trimIndent())
-    }
+val generateQuantifiedIntegrationBuildInfo by tasks.registering(GenerateQuantifiedIntegrationBuildInfoTask::class) {
+    modId.set(providers.gradleProperty("modId"))
+    displayName.set(providers.gradleProperty("quantifiedIntegrationDisplayName"))
+    version.set(providers.gradleProperty("specificationVersion"))
+    outputDirectory.set(quantifiedIntegrationGeneratedSources)
 }
 
 sourceSets {
@@ -135,9 +112,7 @@ tasks.withType<JavaCompile> {
     }
 }
 
-val sourcesJarTask = tasks.named<Jar>("sourcesJar") {
-    dependsOn(generateQuantifiedIntegrationBuildInfo)
-}
+val sourcesJarTask = tasks.named<Jar>("sourcesJar")
 
 val baseArchivesName = "${modId}-${minecraftVersion}-core"
 base {
