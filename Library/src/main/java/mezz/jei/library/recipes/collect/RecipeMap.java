@@ -122,26 +122,29 @@ public class RecipeMap {
 	 * QAPI recipe addition (large ingredient lists).
 	 */
 	private <T> void addRecipeParallel(RecipeType<T> recipeType, T recipe, Collection<ITypedIngredient<?>> ingredients) {
-		try {
-			// Extract ingredient UIDs in parallel
-			Set<Object> ingredientUids = QuantifiedIntegration.mapOrdered("jei-recipe-ingredient-uid", ingredients, this::getIngredientUidSafe)
-				.stream()
-				.filter(java.util.Objects::nonNull)
-				.collect(Collectors.toCollection(ConcurrentHashMap::newKeySet));
+		QuantifiedIntegration.runAsync("jei-recipe-parallel-add-" + recipeType.getUid().getPath(), () -> {
+			try {
+				// Extract ingredient UIDs in parallel
+				List<Object> ingredientUidList = QuantifiedIntegration.mapOrdered("jei-recipe-ingredient-uid", ingredients, this::getIngredientUidSafe);
 
-			if (!ingredientUids.isEmpty()) {
-				// Update category map
-				for (Object uid : ingredientUids) {
-					ingredientUidToCategoryMap.put(uid, recipeType);
+				Set<Object> ingredientUids = ingredientUidList.stream()
+					.filter(java.util.Objects::nonNull)
+					.collect(Collectors.toCollection(ConcurrentHashMap::newKeySet));
+
+				if (!ingredientUids.isEmpty()) {
+					// Update category map
+					for (Object uid : ingredientUids) {
+						ingredientUidToCategoryMap.put(uid, recipeType);
+					}
+
+					// Add to recipe table
+					recipeTable.add(recipe, recipeType, ingredientUids);
 				}
-
-				// Add to recipe table
-				recipeTable.add(recipe, recipeType, ingredientUids);
+			} catch (Exception e) {
+				LOGGER.warn("Parallel recipe addition failed, falling back to sequential for recipe type {}", recipeType, e);
+				addRecipeSequential(recipeType, recipe, ingredients);
 			}
-		} catch (Exception e) {
-			LOGGER.warn("Parallel recipe addition failed, falling back to sequential for recipe type {}", recipeType, e);
-			addRecipeSequential(recipeType, recipe, ingredients);
-		}
+		});
 	}
 
 	private <T> Object getIngredientUidSafe(ITypedIngredient<T> typedIngredient) {
