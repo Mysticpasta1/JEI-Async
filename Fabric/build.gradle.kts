@@ -82,12 +82,19 @@ tasks.withType<JavaCompile> {
     }
 }
 
+repositories{
+    maven {
+        url = uri("https://cursemaven.com")
+    }
+}
+
 dependencies {
     minecraft(
         group = "com.mojang",
         name = "minecraft",
         version = minecraftVersion,
     )
+    modImplementation("curse.maven:just-enough-effect-descriptions-jeed-532286:6172933")
     @Suppress("UnstableApiUsage")
     mappings(loom.layered {
         officialMojangMappings()
