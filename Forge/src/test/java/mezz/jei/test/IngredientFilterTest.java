@@ -7,10 +7,8 @@ import mezz.jei.api.ingredients.ITypedIngredient;
 import mezz.jei.api.runtime.IEditModeConfig;
 import mezz.jei.api.runtime.IIngredientManager;
 import mezz.jei.api.runtime.IIngredientVisibility;
-import mezz.jei.common.config.DebugConfig;
 import mezz.jei.common.config.IClientToggleState;
 import mezz.jei.common.config.IClientConfig;
-import mezz.jei.common.config.file.ConfigSchemaBuilder;
 import mezz.jei.gui.filter.FilterTextSource;
 import mezz.jei.gui.filter.IFilterTextSource;
 import mezz.jei.gui.ingredients.IListElementInfo;
@@ -43,9 +41,6 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.io.IOException;
 
 public class IngredientFilterTest {
 	private static final int EXTRA_INGREDIENT_COUNT = 5;
@@ -66,8 +61,6 @@ public class IngredientFilterTest {
 
 	@BeforeEach
 	public void setup() {
-		bootstrapDebugConfig();
-
 		TestPlugin testPlugin = new TestPlugin();
 
 		SubtypeInterpreters subtypeInterpreters = new SubtypeInterpreters();
@@ -109,19 +102,6 @@ public class IngredientFilterTest {
 		this.ingredientManager.registerIngredientListener(ingredientFilter);
 
 		this.ingredientVisibility.registerListener(this.ingredientFilter);
-	}
-
-	private static void bootstrapDebugConfig() {
-		try {
-			Path debugConfig = Files.createTempFile("jei-debug-test-", ".ini");
-			Files.writeString(debugConfig, "[debug]\nenableAsyncLoading = false\nenableTooltipCache = true\nenableParallelSearch = false\n");
-			debugConfig.toFile().deleteOnExit();
-			ConfigSchemaBuilder builder = new ConfigSchemaBuilder(debugConfig);
-			DebugConfig.create(builder);
-			builder.build().loadIfNeeded();
-		} catch (IOException e) {
-			throw new RuntimeException("Failed to bootstrap test debug config", e);
-		}
 	}
 
 	@Test

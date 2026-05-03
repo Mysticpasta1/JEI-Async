@@ -4,20 +4,21 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
 import mezz.jei.common.platform.Services;
-import mezz.jei.core.QuantifiedIntegration.QuantifiedIntegration;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
 import java.io.Reader;
+import java.io.Writer;
 import java.lang.reflect.Type;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.zip.GZIPInputStream;
+import java.util.zip.GZIPOutputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -30,9 +31,6 @@ import java.util.concurrent.CompletableFuture;
 
 public class SearchStringCache {
 	private static final Logger LOGGER = LogManager.getLogger();
-	private static final String QAPI_CACHE_NAME = "jei.search-string-cache.v1";
-	private static final Duration QAPI_CACHE_TTL = Duration.ofDays(30);
-	private static final long QAPI_CACHE_MAX_SIZE = 8L;
 	private static final String CACHE_FILE_NAME = "search_string_cache.json.gz";
 	private static final String LEGACY_CACHE_FILE_NAME = "search_string_cache.json";
 	private static final int FORMAT_VERSION = 1;
@@ -61,21 +59,35 @@ public class SearchStringCache {
 	}
 
 	public boolean load() {
-		Map<String, Map<String, List<String>>> cache = QuantifiedIntegration.getCached(
-			QAPI_CACHE_NAME,
-			cacheKey,
-			this::loadFromLegacyDiskCache,
-			QAPI_CACHE_TTL,
-			QAPI_CACHE_MAX_SIZE,
-			true
-		);
-		if (cache == null || cache.isEmpty()) {
+		if (!Files.exists(cacheFile)) {
 			LOGGER.info("No search string cache found, will build from scratch");
 			return false;
 		}
-		this.cachedData = cache;
-		LOGGER.info("Loaded search string cache with {} ingredients", cachedData.size());
-		return true;
+
+		try (Reader reader = new InputStreamReader(new GZIPInputStream(Files.newInputStream(cacheFile)), StandardCharsets.UTF_8)) {
+			CacheFile cache = GSON.fromJson(reader, CacheFile.class);
+			if (cache == null || cache.formatVersion != FORMAT_VERSION) {
+				LOGGER.info("Search string cache format version mismatch, rebuilding");
+				return false;
+			}
+			if (!cacheKey.equals(cache.cacheKey)) {
+				LOGGER.info("Search string cache key mismatch (mods/config changed), rebuilding");
+				return false;
+			}
+			if (cache.data == null || cache.data.isEmpty()) {
+				LOGGER.info("Search string cache is empty, rebuilding");
+				return false;
+			}
+			this.cachedData = cache.data;
+			LOGGER.info("Loaded search string cache with {} ingredients", cachedData.size());
+			return true;
+		} catch (Exception e) {
+			LOGGER.warn("Failed to load search string cache, rebuilding", e);
+			try {
+				Files.deleteIfExists(cacheFile);
+			} catch (IOException ignored) {}
+			return false;
+		}
 	}
 
 	@Nullable
@@ -114,53 +126,25 @@ public class SearchStringCache {
 		Map<String, Map<String, List<String>>> dataToSave = collectedData;
 		this.collectedData = null;
 
-		QuantifiedIntegration.runAsync("jei-search-cache-save", () -> {
+		CompletableFuture.runAsync(() -> {
+			CacheFile cache = new CacheFile();
+			cache.formatVersion = FORMAT_VERSION;
+			cache.cacheKey = cacheKey;
+			cache.data = dataToSave;
+
 			try {
-				QuantifiedIntegration.putCached(QAPI_CACHE_NAME, cacheKey, dataToSave, QAPI_CACHE_TTL, QAPI_CACHE_MAX_SIZE, true);
-				deleteMigratedCacheFile();
+				Path parent = cacheFile.getParent();
+				if (parent != null) {
+					Files.createDirectories(parent);
+				}
+				try (Writer writer = new OutputStreamWriter(new GZIPOutputStream(Files.newOutputStream(cacheFile)), StandardCharsets.UTF_8)) {
+					GSON.toJson(cache, writer);
+				}
 				LOGGER.info("Saved search string cache with {} ingredients", dataToSave.size());
 			} catch (Exception e) {
 				LOGGER.warn("Failed to save search string cache", e);
 			}
 		});
-	}
-
-	@Nullable
-	private Map<String, Map<String, List<String>>> loadFromLegacyDiskCache() {
-		if (!Files.exists(cacheFile)) {
-			return null;
-		}
-
-		try (Reader reader = new InputStreamReader(new GZIPInputStream(Files.newInputStream(cacheFile)), StandardCharsets.UTF_8)) {
-			CacheFile cache = GSON.fromJson(reader, CacheFile.class);
-			if (cache == null || cache.formatVersion != FORMAT_VERSION) {
-				LOGGER.info("Search string cache format version mismatch, rebuilding");
-				deleteMigratedCacheFile();
-				return null;
-			}
-			if (!cacheKey.equals(cache.cacheKey)) {
-				LOGGER.info("Search string cache key mismatch (mods/config changed), rebuilding");
-				return null;
-			}
-			if (cache.data == null || cache.data.isEmpty()) {
-				LOGGER.info("Search string cache is empty, rebuilding");
-				deleteMigratedCacheFile();
-				return null;
-			}
-			deleteMigratedCacheFile();
-			LOGGER.info("Migrated legacy search string cache with {} ingredients into Quantified cache", cache.data.size());
-			return cache.data;
-		} catch (Exception e) {
-			LOGGER.warn("Failed to load legacy search string cache, rebuilding", e);
-			deleteMigratedCacheFile();
-			return null;
-		}
-	}
-
-	private void deleteMigratedCacheFile() {
-		try {
-			Files.deleteIfExists(cacheFile);
-		} catch (IOException ignored) {}
 	}
 
 	public static String computeCacheKey(Collection<String> ingredientUids, String locale) {

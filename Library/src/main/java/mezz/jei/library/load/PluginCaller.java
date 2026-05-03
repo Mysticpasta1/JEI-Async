@@ -4,26 +4,29 @@ import com.google.common.base.Stopwatch;
 import mezz.jei.api.IAsyncCompatiblePlugin;
 import mezz.jei.api.IModPlugin;
 import mezz.jei.common.config.DebugConfig;
-import mezz.jei.core.QuantifiedIntegration.QuantifiedIntegration;
 import mezz.jei.library.plugins.vanilla.VanillaPlugin;
-import net.minecraft.client.Minecraft;
 import net.minecraft.resources.ResourceLocation;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 
 public class PluginCaller {
 	private static final Logger LOGGER = LogManager.getLogger();
-
+	private static final ExecutorService EXECUTOR = Executors.newCachedThreadPool(r -> {
+		Thread thread = new Thread(r);
+		thread.setName("JEI Plugin Loader");
+		return thread;
+	});
 
 	public static void callPluginsAsync(
 		String title,
@@ -84,24 +87,18 @@ public class PluginCaller {
 
 		// 1. Start all async plugins
 		List<CompletableFuture<Void>> futures = asyncPlugins.stream()
-				.map(plugin -> QuantifiedIntegration.runAsync("jei-plugin-" + title + "-" + plugin.getPluginUid(), () -> {
+				.map(plugin -> CompletableFuture.runAsync(() -> {
 					try {
 						func.accept(plugin);
 					} catch (Throwable e) {
 						LOGGER.error("Async plugin {} failed during {}:", plugin.getPluginUid(), title, e);
-						if (e instanceof RuntimeException runtimeException) {
-							throw runtimeException;
-						}
-						if (e instanceof Error error) {
-							throw error;
-						}
-						throw new RuntimeException(e);
+						throw e;
 					}
-				}))
+				}, EXECUTOR))
 				.toList();
 
 		// 2. Execute sync plugins
-		for (IModPlugin plugin : syncPlugins) {
+		for (IModPlugin plugin : plugins) {
 			ResourceLocation pluginLocation = plugin.getPluginUid();
 			try {
 				if (plugin instanceof VanillaPlugin) {
@@ -138,108 +135,35 @@ public class PluginCaller {
 		LOGGER.info("{} (with async fallback)...", title);
 		Stopwatch stopwatch = Stopwatch.createStarted();
 
-		List<IModPlugin> knownIncompatible = new ArrayList<>();
-		List<IModPlugin> asyncPlugins = new ArrayList<>();
-		for (IModPlugin plugin : plugins) {
-			if (incompatiblePluginStore.isIncompatible(plugin, title)) {
-				knownIncompatible.add(plugin);
-			} else {
-				asyncPlugins.add(plugin);
-			}
-		}
-
-		List<IModPlugin> newlyFailed = Collections.synchronizedList(new ArrayList<>());
-
-		if (!asyncPlugins.isEmpty()) {
-			List<CompletableFuture<Void>> futures = asyncPlugins.stream()
-				.map(plugin -> QuantifiedIntegration.runAsync("jei-plugin-fallback-" + title + "-" + plugin.getPluginUid(), () -> {
-					ResourceLocation pluginUid = plugin.getPluginUid();
-					try {
-						func.accept(plugin);
-					} catch (RuntimeException | LinkageError e) {
-						if (plugin instanceof VanillaPlugin) {
-							throw e;
-						}
-						LOGGER.warn("{} - plugin {} failed on background thread, will retry on main thread", title, pluginUid, e);
-						incompatiblePluginStore.markIncompatible(plugin, title);
-						newlyFailed.add(plugin);
-					}
-				}))
+		// Filter out known incompatible plugins
+		List<IModPlugin> compatiblePlugins = plugins.stream()
+				.filter(p -> !incompatiblePluginStore.isIncompatible(p, title))
 				.toList();
 
-			try {
-				CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).get(5, TimeUnit.MINUTES);
-			} catch (InterruptedException e) {
-				Thread.currentThread().interrupt();
-				LOGGER.error("Interrupted while waiting for async fallback tasks during {}:", title, e);
-			} catch (ExecutionException e) {
-				LOGGER.error("Async fallback tasks failed during {}:", title, e.getCause());
-			} catch (TimeoutException e) {
-				LOGGER.error("Async fallback tasks timed out after 5 minutes during {}:", title);
-			}
-		}
+		List<IModPlugin> incompatiblePlugins = plugins.stream()
+				.filter(p -> incompatiblePluginStore.isIncompatible(p, title))
+				.toList();
 
-		List<IModPlugin> mainThreadPlugins = new ArrayList<>(knownIncompatible.size() + newlyFailed.size());
-		mainThreadPlugins.addAll(knownIncompatible);
-		mainThreadPlugins.addAll(newlyFailed);
+		// Execute compatible plugins
+		callOnPlugins(title, compatiblePlugins, func);
 
-		if (!mainThreadPlugins.isEmpty()) {
-			if (!knownIncompatible.isEmpty()) {
-				LOGGER.info("Executing {} known-incompatible plugins synchronously for {}...", knownIncompatible.size(), title);
-			}
-			executeOnMainThreadBlocking(() -> {
-				for (IModPlugin plugin : mainThreadPlugins) {
-					ResourceLocation pluginLocation = plugin.getPluginUid();
-					try {
-						func.accept(plugin);
-					} catch (RuntimeException | LinkageError e) {
-						if (plugin instanceof VanillaPlugin) {
-							throw e;
-						}
-						LOGGER.error("Plugin failed on main thread: {}", pluginLocation, e);
+		// Execute incompatible plugins synchronously
+		if (!incompatiblePlugins.isEmpty()) {
+			LOGGER.info("Executing {} incompatible plugins synchronously for {}...", incompatiblePlugins.size(), title);
+			for (IModPlugin plugin : plugins) {
+				ResourceLocation pluginLocation = plugin.getPluginUid();
+				try {
+					if (plugin instanceof VanillaPlugin) {
+						LOGGER.info("Calling VanillaPlugin...");
 					}
+					func.accept(plugin);
+				} catch (Throwable e) {
+					LOGGER.error("Plugin failed: {}", pluginLocation, e);
 				}
-			});
+			}
 		}
 
 		stopwatch.stop();
 		LOGGER.info("{} (with async fallback) took {}", title, stopwatch);
-	}
-
-	private static void executeOnMainThreadBlocking(Runnable task) {
-		Minecraft minecraft = Minecraft.getInstance();
-		if (minecraft.isSameThread()) {
-			task.run();
-			return;
-		}
-
-		CompletableFuture<Void> future = new CompletableFuture<>();
-		minecraft.execute(() -> {
-			try {
-				task.run();
-				future.complete(null);
-			} catch (Throwable e) {
-				future.completeExceptionally(e);
-			}
-		});
-
-		try {
-			future.get();
-		} catch (ExecutionException e) {
-			Throwable cause = e.getCause();
-			if (cause instanceof RuntimeException re) {
-				throw re;
-			}
-			if (cause instanceof LinkageError le) {
-				throw le;
-			}
-			if (cause instanceof Error err) {
-				throw err;
-			}
-			throw new RuntimeException(cause);
-		} catch (InterruptedException e) {
-			Thread.currentThread().interrupt();
-			throw new RuntimeException("Interrupted while waiting for main thread execution", e);
-		}
 	}
 }

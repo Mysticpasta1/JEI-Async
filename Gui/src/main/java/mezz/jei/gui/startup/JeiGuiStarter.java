@@ -35,7 +35,6 @@ import mezz.jei.gui.filter.IFilterTextSource;
 import mezz.jei.gui.ingredients.IListElement;
 import mezz.jei.gui.ingredients.IListElementInfo;
 import mezz.jei.gui.ingredients.IngredientFilter;
-import mezz.jei.gui.ingredients.IngredientSortCache;
 import mezz.jei.gui.ingredients.IngredientFilterApi;
 import mezz.jei.gui.ingredients.IngredientListElementFactory;
 import mezz.jei.gui.ingredients.IngredientSorter;
@@ -54,7 +53,6 @@ import mezz.jei.gui.overlay.IngredientListOverlay;
 import mezz.jei.gui.overlay.bookmarks.BookmarkOverlay;
 import mezz.jei.gui.overlay.bookmarks.history.LookupHistory;
 import mezz.jei.gui.recipes.RecipesGui;
-import mezz.jei.gui.search.SearchStringCache;
 import mezz.jei.gui.util.FocusUtil;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -62,10 +60,8 @@ import net.minecraft.core.RegistryAccess;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.nio.file.Path;
 
 public class JeiGuiStarter {
 	private static final Logger LOGGER = LogManager.getLogger();
@@ -128,10 +124,8 @@ public class JeiGuiStarter {
 			modNameSortingConfig,
 			ingredientTypeSortingConfig,
 			ingredientManager,
-			ingredientList,
-			createIngredientSortCache(ingredientList, clientConfig)
+			ingredientList
 		);
-		SearchStringCache searchStringCache = createSearchStringCache(ingredientList);
 
 		IngredientFilter ingredientFilter = new IngredientFilter(
 			filterTextSource,
@@ -144,7 +138,7 @@ public class JeiGuiStarter {
 			ingredientVisibility,
 			colorHelper,
 			toggleState,
-			searchStringCache
+			null
 		);
 		ingredientManager.registerIngredientListener(ingredientFilter);
 		ingredientVisibility.registerListener(ingredientFilter);
@@ -260,47 +254,5 @@ public class JeiGuiStarter {
 			clientInputHandler,
 			resourceReloadHandler
 		);
-	}
-
-	private static SearchStringCache createSearchStringCache(
-		List<IListElementInfo<?>> ingredientList
-	) {
-		Minecraft minecraft = Minecraft.getInstance();
-		String locale = minecraft.options.languageCode;
-
-		List<String> resourceIds = new ArrayList<>(ingredientList.size());
-		for (IListElementInfo<?> info : ingredientList) {
-			resourceIds.add(info.getResourceLocation().toString());
-		}
-
-		String cacheKey = SearchStringCache.computeCacheKey(resourceIds, locale);
-		LOGGER.info("Search string cache key: {} (ingredients={}, locale={})", cacheKey.substring(0, 16), resourceIds.size(), locale);
-		SearchStringCache cache = new SearchStringCache(cacheKey);
-		cache.load();
-		return cache;
-	}
-
-	private static IngredientSortCache createIngredientSortCache(
-		List<IListElementInfo<?>> ingredientList,
-		IClientConfig clientConfig
-	) {
-		Minecraft minecraft = Minecraft.getInstance();
-		String locale = minecraft.options.languageCode;
-		Path configDir = mezz.jei.common.platform.Services.PLATFORM.getConfigHelper().createJeiConfigDir();
-		List<Path> configPaths = List.of(
-			configDir.resolve("ingredient-list-mod-sort-order.ini"),
-			configDir.resolve("ingredient-list-type-sort-order.ini")
-		);
-
-		String cacheKey = IngredientSortCache.computeCacheKey(
-			ingredientList,
-			locale,
-			clientConfig.getIngredientSorterStages(),
-			configPaths
-		);
-		LOGGER.info("Ingredient sort cache key: {} (ingredients={}, stages={})", cacheKey.substring(0, 16), ingredientList.size(), clientConfig.getIngredientSorterStages().size());
-		IngredientSortCache cache = new IngredientSortCache(cacheKey);
-		cache.load();
-		return cache;
 	}
 }

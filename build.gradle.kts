@@ -37,7 +37,6 @@ val forgeVersionRange: String by extra
 val forgeLoaderVersionRange: String by extra
 val githubUrl: String by extra
 val parchmentVersionForge: String by extra
-val quantifiedVersion: String by extra
 val minecraftVersion: String by extra
 val minecraftVersionRange: String by extra
 val modAuthor: String by extra
@@ -105,7 +104,6 @@ subprojects {
             "modId" to modId,
             "modJavaVersion" to modJavaVersion,
             "modName" to modName,
-            "quantifiedVersion" to quantifiedVersion,
             "version" to version,
         )
         inputs.properties(properties)

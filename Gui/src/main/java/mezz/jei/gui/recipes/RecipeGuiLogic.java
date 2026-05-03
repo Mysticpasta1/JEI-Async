@@ -136,12 +136,9 @@ public class RecipeGuiLogic implements IRecipeGuiLogic {
 			return null;
 		}
 		T recipe = recipes.get(0);
-		IRecipeLayoutDrawable<T> drawable = recipeManager.createRecipeLayoutDrawable(recipeCategory, recipe, focusGroup)
+		return recipeManager.createRecipeLayoutDrawable(recipeCategory, recipe, focusGroup)
+			.map(drawable -> RecipeBookmark.create(drawable, ingredientManager))
 			.orElse(null);
-		if (drawable == null) {
-			return null;
-		}
-		return RecipeBookmark.create(drawable, ingredientManager);
 	}
 
 	@Override

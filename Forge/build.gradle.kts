@@ -25,16 +25,7 @@ val modGroup: String by extra
 val modId: String by extra
 val modJavaVersion: String by extra
 val parchmentVersionForge: String by extra
-val quantifiedVersion: String by extra
 val modrinthId: String by extra
-
-val quantifiedJars = rootProject.fileTree(rootProject.file("libs")) {
-	include("quantified*omni*${quantifiedVersion}.jar", "quantified-${quantifiedVersion}.jar")
-}.files
-if (quantifiedJars.isEmpty()) {
-	throw GradleException("Missing Quantified API jar in libs (expected quantified*omni*${quantifiedVersion}.jar)")
-}
-val quantifiedJar = quantifiedJars.sortedBy { it.name }.last()
 
 // set by ORG_GRADLE_PROJECT_modrinthToken in Jenkinsfile
 val modrinthToken: String? by project
@@ -58,9 +49,6 @@ sourceSets {
 repositories {
 	maven {
 		url = uri("https://cursemaven.com")
-	}
-	flatDir {
-		dirs(rootProject.file("libs"))
 	}
 }
 
@@ -91,7 +79,6 @@ dependencies {
 		name = "forge",
 		version = "${minecraftVersion}-${forgeVersion}"
 	)
-	implementation(fg.deobf(files(quantifiedJar)))
 	implementation(fg.deobf("curse.maven:projecte-226410:4901949"))
 	dependencyProjects.forEach {
 		implementation(it)
@@ -168,7 +155,6 @@ tasks.jar {
 }
 
 val sourcesJarTask = tasks.named<Jar>("sourcesJar") {
-	dependsOn(project(":Core").tasks.named("generateQuantifiedIntegrationBuildInfo"))
 	from(sourceSets.main.get().allJava)
 	for (p in dependencyProjects) {
 		from(p.sourceSets.main.get().allJava)
