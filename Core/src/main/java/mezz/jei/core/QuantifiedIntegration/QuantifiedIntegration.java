@@ -12,7 +12,6 @@ import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -23,11 +22,6 @@ public final class QuantifiedIntegration {
 	private static final String DISPLAY_NAME = QuantifiedIntegrationBuildInfo.DISPLAY_NAME;
 	private static final String VERSION = QuantifiedIntegrationBuildInfo.VERSION;
 	private static final ThreadLocal<Integer> ACTIVE_TASK_DEPTH = ThreadLocal.withInitial(() -> 0);
-	private static final Executor SERVICE_EXECUTOR = Executors.newCachedThreadPool(r -> {
-		Thread t = new Thread(r, "JEI-Async-Service");
-		t.setDaemon(true);
-		return t;
-	});
 	private static volatile boolean registered;
 
 	private QuantifiedIntegration() {
@@ -76,30 +70,23 @@ public final class QuantifiedIntegration {
 		if (ACTIVE_TASK_DEPTH.get() > 0) {
 			return runInline(work);
 		}
+		bindCurrentThread();
 		try {
-			bindCurrentThread();
+			return QuantifiedAPI.submit(normalizeTaskName(taskName), () -> {
+				enterTask();
+				try {
+					return work.get();
+				} finally {
+					exitTask();
+				}
+			});
 		} catch (RuntimeException e) {
-			// API not available, run inline instead of blocking
-			return runInline(work);
-		}
-
-		// Use SERVICE_EXECUTOR to perform the submission to Quantified API,
-		// ensuring we never block the calling thread (especially the main thread).
-		return CompletableFuture.supplyAsync(() -> {
-			try {
-				return QuantifiedAPI.submit(normalizeTaskName(taskName), () -> {
-					enterTask();
-					try {
-						return work.get();
-					} finally {
-						exitTask();
-					}
-				}).join();
-			} catch (RuntimeException e) {
-				// Submit failed, run inline instead of blocking
-				return runInline(work).join();
+			Throwable cause = e.getCause();
+			if (cause instanceof RuntimeException runtimeException) {
+				throw runtimeException;
 			}
-		}, SERVICE_EXECUTOR);
+			throw new IllegalStateException("Quantified API submit failed for " + taskName, cause == null ? e : cause);
+		}
 	}
 
 	public static <T> void forEach(String taskName, Collection<T> values, Consumer<T> consumer) {
