@@ -49,7 +49,6 @@ val modGroup: String by extra
 val modId: String by extra
 val modJavaVersion: String by extra
 val modName: String by extra
-val quantifiedVersion: String by extra
 val specificationVersion: String by extra
 
 spotless {
@@ -113,7 +112,6 @@ subprojects {
             "modId" to modId,
             "modJavaVersion" to modJavaVersion,
             "modName" to modName,
-            "quantifiedVersion" to quantifiedVersion,
             "version" to version,
         )
         inputs.properties(properties)

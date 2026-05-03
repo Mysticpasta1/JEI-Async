@@ -20,7 +20,6 @@ out/
 .idea
 build/*
 /bin/
-**/bin/
 changelog.html
 /classes
 /logs

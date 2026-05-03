@@ -12,7 +12,6 @@ import mezz.jei.api.recipe.category.IRecipeCategory;
 import mezz.jei.api.runtime.IIngredientManager;
 import mezz.jei.api.runtime.IIngredientVisibility;
 import mezz.jei.common.util.ErrorUtil;
-import mezz.jei.core.QuantifiedIntegration.QuantifiedIntegration;
 import mezz.jei.library.config.RecipeCategorySortingConfig;
 import mezz.jei.library.recipes.collect.RecipeMap;
 import mezz.jei.library.recipes.collect.RecipeTypeData;
@@ -152,7 +151,7 @@ public class RecipeManagerInternal {
 	 * This runs in parallel with GUI building for faster startup.
 	 */
 	public void buildRecipeIndexAsync() {
-		this.indexBuildFuture = QuantifiedIntegration.runAsync("jei-recipe-index", this::buildRecipeIndex)
+		this.indexBuildFuture = CompletableFuture.runAsync(this::buildRecipeIndex)
 			.whenComplete((result, error) -> {
 				if (error != null) {
 					LOGGER.error("Recipe index building failed!", error);

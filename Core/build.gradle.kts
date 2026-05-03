@@ -1,6 +1,5 @@
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.api.tasks.testing.logging.TestLogEvent
-import mezz.jei.build.GenerateQuantifiedIntegrationBuildInfoTask
 
 plugins {
     id("idea")
@@ -17,21 +16,8 @@ val jUnitVersion: String by extra
 val minecraftVersion: String by extra
 val modId: String by extra
 val modJavaVersion: String by extra
-val modName: String by extra
-val quantifiedIntegrationDisplayName: String by extra
-val quantifiedVersion: String by extra
-val specificationVersion: String by extra
-
-val quantifiedJars = rootProject.fileTree(rootProject.file("libs")) {
-	include("quantified*omni*${quantifiedVersion}.jar", "quantified-${quantifiedVersion}.jar")
-}.files
-if (quantifiedJars.isEmpty()) {
-	throw GradleException("Missing Quantified API jar in libs (expected quantified*omni*${quantifiedVersion}.jar)")
-}
-val quantifiedJar = quantifiedJars.sortedBy { it.name }.last()
 
 dependencies {
-	compileOnly(files(quantifiedJar))
     implementation(
         group = "com.google.guava",
         name = "guava",
@@ -64,17 +50,8 @@ dependencies {
     )
 }
 
-val quantifiedIntegrationGeneratedSources = layout.buildDirectory.dir("generated/sources/quantifiedIntegration/java")
-val generateQuantifiedIntegrationBuildInfo by tasks.registering(GenerateQuantifiedIntegrationBuildInfoTask::class) {
-    modId.set(providers.gradleProperty("modId"))
-    displayName.set(providers.gradleProperty("quantifiedIntegrationDisplayName"))
-    version.set(providers.gradleProperty("specificationVersion"))
-    outputDirectory.set(quantifiedIntegrationGeneratedSources)
-}
-
 sourceSets {
     named("main") {
-        java.srcDir(quantifiedIntegrationGeneratedSources)
         //The Core has no resources
         resources.setSrcDirs(emptyList<String>())
     }
@@ -103,7 +80,6 @@ java {
 }
 
 tasks.withType<JavaCompile> {
-	dependsOn(generateQuantifiedIntegrationBuildInfo)
     options.encoding = "UTF-8"
     javaToolchains {
         compilerFor {

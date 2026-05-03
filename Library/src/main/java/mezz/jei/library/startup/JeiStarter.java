@@ -17,7 +17,6 @@ import mezz.jei.common.config.file.IConfigSchemaBuilder;
 import mezz.jei.common.platform.Services;
 import mezz.jei.common.util.ErrorUtil;
 import mezz.jei.common.util.RegistryUtil;
-import mezz.jei.core.QuantifiedIntegration.QuantifiedIntegration;
 import mezz.jei.core.util.LoggedTimer;
 import mezz.jei.library.color.ColorHelper;
 import mezz.jei.library.config.ColorNameConfig;
@@ -48,11 +47,18 @@ import org.apache.logging.log4j.Logger;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
 
 public final class JeiStarter {
 	private static final Logger LOGGER = LogManager.getLogger();
 	private static final String EXPECTED_VERSION = "19.27.0.340-async-9";
+	private static final ExecutorService LOADING_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
+		Thread t = new Thread(r, "JEI Background Loader");
+		t.setDaemon(true);
+		return t;
+	});
 
 	private final StartData data;
 	private List<IModPlugin> plugins;
@@ -151,9 +157,8 @@ public final class JeiStarter {
 		cancelled = false;
 		loadingState = LoadingState.INITIALIZING;
 		LOGGER.info("Starting JEI background loading...");
-		QuantifiedIntegration.register();
 
-		CompletableFuture<Void> future = QuantifiedIntegration.runAsync("jei-background-loading", () -> {
+		CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
 			try {
 				doLoadingAsync();
 			} catch (Exception e) {
@@ -161,7 +166,7 @@ public final class JeiStarter {
 					LOGGER.error("JEI background loading failed catastrophically", e);
 				}
 			}
-		});
+		}, LOADING_EXECUTOR);
 		loadingFuture.set(future);
 	}
 
@@ -210,7 +215,7 @@ public final class JeiStarter {
 				return;
 			}
 			Internal.setRuntime(jeiRuntime);
-			PluginCaller.callPlugins("Sending Runtime", plugins, p -> p.onRuntimeAvailable(jeiRuntime), false, incompatiblePluginStore);
+			PluginCaller.callPlugins("Sending Runtime", plugins, p -> p.onRuntimeAvailable(jeiRuntime), true, incompatiblePluginStore);
 			Internal.setLoadingProgress(null);
 			LOGGER.info("JEI has finished background loading and is now available.");
 			playLoadCompleteSound();

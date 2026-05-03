@@ -22,16 +22,7 @@ val minecraftVersionRangeStart: String by extra
 val modGroup: String by extra
 val modId: String by extra
 val modJavaVersion: String by extra
-val quantifiedVersion: String by extra
 val modrinthId: String by extra
-
-val quantifiedJars = rootProject.fileTree(rootProject.file("libs")) {
-	include("quantified*omni*${quantifiedVersion}.jar", "quantified-${quantifiedVersion}.jar")
-}.files
-if (quantifiedJars.isEmpty()) {
-	throw GradleException("Missing Quantified API jar in libs (expected quantified*omni*${quantifiedVersion}.jar)")
-}
-val quantifiedJar = quantifiedJars.sortedBy { it.name }.last()
 
 // set by ORG_GRADLE_PROJECT_modrinthToken in Jenkinsfile
 val modrinthToken: String? by project
@@ -86,7 +77,6 @@ java {
 }
 
 dependencies {
-	implementation(files(quantifiedJar))
 	dependencyProjects.forEach {
 		implementation(it)
 	}
@@ -100,12 +90,6 @@ dependencies {
 		name = "junit-jupiter-engine",
 		version = jUnitVersion
 	)
-}
-
-repositories {
-	flatDir {
-		dirs(rootProject.file("libs"))
-	}
 }
 
 neoForge {

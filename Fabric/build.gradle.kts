@@ -42,15 +42,6 @@ val parchmentVersionFabric: String by extra
 val modrinthId: String by extra
 val amecsVersionFabric: String by extra
 val amecsMinecraftVersion: String by extra
-val quantifiedVersion: String by extra
-
-val quantifiedJars = rootProject.fileTree(rootProject.file("libs")) {
-    include("quantified*omni*${quantifiedVersion}.jar", "quantified-${quantifiedVersion}.jar")
-}.files
-if (quantifiedJars.isEmpty()) {
-    throw GradleException("Missing Quantified API jar in libs (expected quantified*omni*${quantifiedVersion}.jar)")
-}
-val quantifiedJar = quantifiedJars.sortedBy { it.name }.last()
 
 // set by ORG_GRADLE_PROJECT_modrinthToken in Jenkinsfile
 val modrinthToken: String? by project
@@ -121,7 +112,6 @@ dependencies {
         name = "amecsapi-${amecsMinecraftVersion}",
         version = amecsVersionFabric
     )
-    implementation(files(quantifiedJar))
     dependencyProjects.forEach {
         implementation(it)
     }
@@ -206,7 +196,6 @@ tasks.jar {
     for (p in dependencyProjects) {
         from(p.dependencyProject.sourceSets.main.get().output)
     }
-    from(zipTree(quantifiedJar))
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
