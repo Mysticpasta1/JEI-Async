@@ -3,13 +3,10 @@
   "minVersion": "0.8",
   "package": "mezz.jei.fabric.mixin",
   "compatibilityLevel": "JAVA_16",
-  "mixins": [
-  ],
   "client": [
     "AbstractContainerScreenMixin",
     "ClientPacketListenerMixin",
     "EffectRenderingInventoryScreenMixin",
-    "JEIPluginMixin",
     "KeyboardHandlerMixin",
     "MinecraftMixin",
     "ScreenMixin"

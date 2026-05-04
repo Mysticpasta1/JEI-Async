@@ -2,7 +2,6 @@ package mezz.jei.library.load.registration;
 
 import mezz.jei.api.helpers.IJeiHelpers;
 import mezz.jei.api.recipe.category.extensions.vanilla.smithing.IExtendableSmithingRecipeCategory;
-import mezz.jei.library.runtime.JeiHelpers;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 
 import mezz.jei.api.recipe.category.extensions.IExtendableRecipeCategory;
@@ -12,12 +11,12 @@ import mezz.jei.api.registration.IVanillaCategoryExtensionRegistration;
 public class VanillaCategoryExtensionRegistration implements IVanillaCategoryExtensionRegistration {
 	private final IExtendableRecipeCategory<CraftingRecipe, ICraftingCategoryExtension> craftingCategory;
 	private final IExtendableSmithingRecipeCategory smithingCategory;
-	private final JeiHelpers jeiHelpers;
+	private final IJeiHelpers jeiHelpers;
 
 	public VanillaCategoryExtensionRegistration(
 		IExtendableRecipeCategory<CraftingRecipe, ICraftingCategoryExtension> craftingCategory,
 		IExtendableSmithingRecipeCategory smithingCategory,
-		JeiHelpers jeiHelpers
+		IJeiHelpers jeiHelpers
 	) {
 		this.craftingCategory = craftingCategory;
 		this.smithingCategory = smithingCategory;

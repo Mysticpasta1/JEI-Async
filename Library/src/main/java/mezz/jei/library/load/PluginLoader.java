@@ -51,6 +51,7 @@ import mezz.jei.library.plugins.vanilla.anvil.SmithingRecipeCategory;
 import mezz.jei.library.plugins.vanilla.crafting.CraftingRecipeCategory;
 import mezz.jei.library.recipes.RecipeManager;
 import mezz.jei.library.recipes.RecipeManagerInternal;
+import mezz.jei.library.runtime.DelegatingJeiHelpers;
 import mezz.jei.library.runtime.JeiHelpers;
 import mezz.jei.library.startup.StartData;
 import mezz.jei.library.transfer.RecipeTransferHandlerHelper;
@@ -137,13 +138,22 @@ public final class PluginLoader {
 	}
 
 	@Unmodifiable
-	private static List<IRecipeCategory<?>> createRecipeCategories(List<IModPlugin> plugins, VanillaPlugin vanillaPlugin, JeiHelpers jeiHelpers) {
+	private static List<IRecipeCategory<?>> createRecipeCategories(List<IModPlugin> plugins, VanillaPlugin vanillaPlugin, IJeiHelpers jeiHelpers) {
 		return createRecipeCategories(plugins, vanillaPlugin, jeiHelpers, false, null);
 	}
 
 	@Unmodifiable
-	private static List<IRecipeCategory<?>> createRecipeCategories(List<IModPlugin> plugins, VanillaPlugin vanillaPlugin, JeiHelpers jeiHelpers, boolean useAsyncFallback, IncompatiblePluginStore incompatiblePluginStore) {
-		RecipeCategoryRegistration recipeCategoryRegistration = new RecipeCategoryRegistration(jeiHelpers);
+	private static List<IRecipeCategory<?>> createRecipeCategories(List<IModPlugin> plugins, VanillaPlugin vanillaPlugin, IJeiHelpers jeiHelpers, boolean useAsyncFallback, IncompatiblePluginStore incompatiblePluginStore) {
+		RecipeCategoryRegistration recipeCategoryRegistration = new RecipeCategoryRegistration(jeiHelpers, categories -> {
+			if (jeiHelpers instanceof JeiHelpers concreteHelpers) {
+				concreteHelpers.setRecipeCategories(categories);
+			} else if (jeiHelpers instanceof DelegatingJeiHelpers delegatingHelpers) {
+				IJeiHelpers delegate = delegatingHelpers.getDelegate();
+				if (delegate instanceof JeiHelpers concreteHelpers) {
+					concreteHelpers.setRecipeCategories(categories);
+				}
+			}
+		});
 		if (useAsyncFallback && incompatiblePluginStore != null) {
 			PluginCaller.callOnPluginsWithFallback("Registering categories", plugins, p -> p.registerCategories(recipeCategoryRegistration), incompatiblePluginStore);
 		} else {
@@ -170,7 +180,7 @@ public final class PluginLoader {
 
 	public static IRecipeTransferManager createRecipeTransferManager(
 		List<IModPlugin> plugins,
-		JeiHelpers jeiHelpers,
+		IJeiHelpers jeiHelpers,
 		IConnectionToServer connectionToServer
 	) {
 		IStackHelper stackHelper = jeiHelpers.getStackHelper();
@@ -184,7 +194,7 @@ public final class PluginLoader {
 		List<IModPlugin> plugins,
 		VanillaPlugin vanillaPlugin,
 		RecipeCategorySortingConfig recipeCategorySortingConfig,
-		JeiHelpers jeiHelpers,
+		IJeiHelpers jeiHelpers,
 		IIngredientManager ingredientManager
 	) {
 		return createRecipeManager(plugins, vanillaPlugin, recipeCategorySortingConfig, jeiHelpers, ingredientManager, false, null);
@@ -194,7 +204,7 @@ public final class PluginLoader {
 		List<IModPlugin> plugins,
 		VanillaPlugin vanillaPlugin,
 		RecipeCategorySortingConfig recipeCategorySortingConfig,
-		JeiHelpers jeiHelpers,
+		IJeiHelpers jeiHelpers,
 		IIngredientManager ingredientManager,
 		boolean useAsyncFallback,
 		IncompatiblePluginStore incompatiblePluginStore

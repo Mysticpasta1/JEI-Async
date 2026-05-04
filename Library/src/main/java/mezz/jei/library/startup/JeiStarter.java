@@ -2,6 +2,7 @@ package mezz.jei.library.startup;
 
 import mezz.jei.api.IModPlugin;
 import mezz.jei.api.helpers.IColorHelper;
+import mezz.jei.api.recipe.transfer.IRecipeTransferHandlerHelper;
 import mezz.jei.api.recipe.transfer.IRecipeTransferManager;
 import mezz.jei.api.runtime.IIngredientManager;
 import mezz.jei.api.runtime.IScreenHelper;
@@ -32,9 +33,14 @@ import mezz.jei.library.load.PluginLoader;
 import mezz.jei.library.load.registration.RuntimeRegistration;
 import mezz.jei.library.plugins.jei.JeiInternalPlugin;
 import mezz.jei.library.plugins.vanilla.VanillaPlugin;
+import mezz.jei.library.recipes.DelegatingRecipeManager;
 import mezz.jei.library.recipes.RecipeManager;
 import mezz.jei.library.runtime.JeiHelpers;
 import mezz.jei.library.runtime.JeiRuntime;
+import mezz.jei.library.ingredients.subtypes.SubtypeInterpreters;
+import mezz.jei.library.load.registration.IngredientManagerBuilder;
+import mezz.jei.library.load.registration.SkeletonRegistration;
+import mezz.jei.library.runtime.DelegatingJeiHelpers;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.core.RegistryAccess;
@@ -74,6 +80,8 @@ public final class JeiStarter {
 	private volatile boolean cancelled = false;
 	private volatile boolean hidden = false;
 	private volatile LoadingState loadingState = LoadingState.NOT_STARTED;
+	private final DelegatingJeiHelpers delegatingJeiHelpers = new DelegatingJeiHelpers(null);
+	private final DelegatingRecipeManager delegatingRecipeManager = new DelegatingRecipeManager();
 
 	public JeiStarter(StartData data) {
 		if (Services.PLATFORM.getModHelper().isModLoaded("emi")) {
@@ -135,24 +143,42 @@ public final class JeiStarter {
 			return;
 		}
 
+		// Prevent concurrent loading
+		if (isStarting) {
+			LOGGER.warn("JEI is already starting. Ignoring duplicate start() call.");
+			return;
+		}
+
 		// Main thread: capture RegistryAccess (requires minecraft.level)
 		RegistryAccess registryAccess = minecraft.level.registryAccess();
 		RegistryUtil.setRegistryAccess(registryAccess);
 
 		if (hidden) {
 			LOGGER.info("JEI is hidden because EMI is loaded. Loading recipes without GUI...");
-			doLoadingSync();
-			Internal.getClientToggleState().setHiddenByEmi(true);
+			isStarting = true;
+			try {
+				doLoadingSync();
+				Internal.getClientToggleState().setHiddenByEmi(true);
+			} finally {
+				isStarting = false;
+			}
 			return;
 		}
 
 		if (!DebugConfig.isAsyncLoadingEnabled()) {
 			// Sync mode: run everything on main thread (unchanged behavior)
-			doLoadingSync();
+			isStarting = true;
+			try {
+				doLoadingSync();
+			} finally {
+				isStarting = false;
+			}
 			return;
 		}
 
 		// Async mode: launch background task
+		// Note: doPreLoadingSync() removed to prevent main thread freeze
+		isStarting = true;
 		cancelled = false;
 		loadingState = LoadingState.INITIALIZING;
 		LOGGER.info("Starting JEI background loading...");
@@ -164,6 +190,8 @@ public final class JeiStarter {
 				if (!cancelled) {
 					LOGGER.error("JEI background loading failed catastrophically", e);
 				}
+			} finally {
+				isStarting = false;
 			}
 		}, LOADING_EXECUTOR);
 		loadingFuture.set(future);
@@ -210,6 +238,56 @@ PluginCaller.callPlugins("Sending Runtime", plugins, p -> p.onRuntimeAvailable(j
 		});
 	}
 
+	private void doPreLoadingSync() {
+		LOGGER.info("Performing JEI pre-registration for sync plugins...");
+		IColorHelper colorHelper = new ColorHelper(colorNameConfig);
+		SubtypeManager skeletonSubtypeManager = new SubtypeManager(new SubtypeInterpreters());
+		IIngredientManager skeletonIngredientManager = new IngredientManagerBuilder(skeletonSubtypeManager, colorHelper).build();
+		FocusFactory skeletonFocusFactory = new FocusFactory(skeletonIngredientManager);
+
+		Path configDir = Services.PLATFORM.getConfigHelper().createJeiConfigDir();
+		EditModeConfig skeletonEditModeConfig = new EditModeConfig(new EditModeConfig.FileSerializer(configDir.resolve("blacklist.cfg")), skeletonIngredientManager);
+
+		JeiHelpers skeletonHelpers = PluginLoader.createJeiHelpers(modIdFormatConfig, colorHelper, skeletonEditModeConfig, skeletonFocusFactory, skeletonIngredientManager, skeletonSubtypeManager);
+		delegatingJeiHelpers.setDelegate(skeletonHelpers);
+		delegatingRecipeManager.setDelegate(null);
+
+		IScreenHelper skeletonScreenHelper = new mezz.jei.library.load.registration.GuiHandlerRegistration(delegatingJeiHelpers).createGuiScreenHelper(skeletonIngredientManager);
+		IRecipeTransferHandlerHelper skeletonTransferHelper = new mezz.jei.library.transfer.RecipeTransferHandlerHelper(skeletonHelpers.getStackHelper());
+
+		SkeletonRegistration skeletonRegistration = new SkeletonRegistration(
+			delegatingJeiHelpers,
+			skeletonIngredientManager,
+			delegatingRecipeManager,
+			skeletonEditModeConfig,
+			skeletonScreenHelper,
+			skeletonTransferHelper
+		);
+
+		// Filter to only sync plugins before dispatching
+		List<IModPlugin> syncOnlyPlugins = plugins.stream()
+			.filter(p -> !(p instanceof mezz.jei.api.IAsyncCompatiblePlugin async && async.canExecuteAsync()))
+			.toList();
+
+		// Only call on sync plugins to set their static fields early on the main thread
+		PluginCaller.callOnPlugins("Pre-registering sync plugins", syncOnlyPlugins, p -> {
+			try {
+				p.registerCategories(skeletonRegistration);
+				p.registerRecipes(skeletonRegistration);
+				p.registerVanillaCategoryExtensions(skeletonRegistration);
+				p.registerRecipeTransferHandlers(skeletonRegistration);
+				p.registerRecipeCatalysts(skeletonRegistration);
+				p.registerGuiHandlers(skeletonRegistration);
+				p.registerAdvanced(skeletonRegistration);
+				p.registerRuntime(skeletonRegistration);
+			} catch (Exception e) {
+				// Some plugins might throw exceptions if they expect full registration objects
+				// We ignore them as this is a best-effort pre-registration
+				LOGGER.debug("Failed to pre-register plugin {}: {}", p.getPluginUid(), e.getMessage());
+			}
+		});
+	}
+
 	private void playLoadCompleteSound() {
 		try {
 			Minecraft minecraft = Minecraft.getInstance();
@@ -249,6 +327,7 @@ PluginCaller.callPlugins("Sending Runtime", plugins, p -> p.onRuntimeAvailable(j
 		EditModeConfig editModeConfig = new EditModeConfig(new EditModeConfig.FileSerializer(configDir.resolve("blacklist.cfg")), ingredientManager);
 
 		JeiHelpers jeiHelpers = PluginLoader.createJeiHelpers(modIdFormatConfig, colorHelper, editModeConfig, focusFactory, ingredientManager, subtypeManager);
+		delegatingJeiHelpers.setDelegate(jeiHelpers);
 
 		if (cancelled) {
 			throw new CancelledException();
@@ -262,11 +341,12 @@ PluginCaller.callPlugins("Sending Runtime", plugins, p -> p.onRuntimeAvailable(j
 			plugins,
 			vanillaPlugin,
 			recipeCategorySortingConfig,
-			jeiHelpers,
+			delegatingJeiHelpers,
 			ingredientManager,
 			useAsyncFallback,
 			incompatiblePluginStore
 		);
+		delegatingRecipeManager.setDelegate(recipeManager);
 
 		if (cancelled) {
 			throw new CancelledException();
@@ -278,17 +358,17 @@ PluginCaller.callPlugins("Sending Runtime", plugins, p -> p.onRuntimeAvailable(j
 		}
 		IRecipeTransferManager recipeTransferManager = PluginLoader.createRecipeTransferManager(
 			plugins,
-			jeiHelpers,
+			delegatingJeiHelpers,
 			data.serverConnection()
 		);
 
 		LoggedTimer timer = new LoggedTimer();
 		timer.start("Building runtime");
-		IScreenHelper screenHelper = PluginLoader.createGuiScreenHelper(plugins, jeiHelpers, ingredientManager);
+		IScreenHelper screenHelper = PluginLoader.createGuiScreenHelper(plugins, delegatingJeiHelpers, ingredientManager);
 
 		RuntimeRegistration runtimeRegistration = new RuntimeRegistration(
 			recipeManager,
-			jeiHelpers,
+			delegatingJeiHelpers,
 			editModeConfig,
 			ingredientManager,
 			recipeTransferManager,
@@ -301,7 +381,7 @@ PluginCaller.callPlugins("Sending Runtime", plugins, p -> p.onRuntimeAvailable(j
 			recipeManager,
 			ingredientManager,
 			data.keyBindings(),
-			jeiHelpers,
+			delegatingJeiHelpers,
 			screenHelper,
 			recipeTransferManager,
 			editModeConfig,
@@ -331,6 +411,7 @@ PluginCaller.callPlugins("Sending Runtime", plugins, p -> p.onRuntimeAvailable(j
 		LOGGER.info("Stopping JEI");
 		cancelled = true;
 		loadingState = LoadingState.NOT_STARTED;
+		isStarting = false;
 		Internal.setLoadingProgress(null);
 
 		CompletableFuture<Void> future = loadingFuture.getAndSet(null);

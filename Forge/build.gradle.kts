@@ -80,7 +80,6 @@ dependencies {
 		version = "${minecraftVersion}-${forgeVersion}"
 	)
 	implementation(fg.deobf("curse.maven:projecte-226410:4901949"))
-	implementation(fg.deobf("curse.maven:just-enough-effect-descriptions-jeed-532286:6172935"))
 	dependencyProjects.forEach {
 		implementation(it)
 	}

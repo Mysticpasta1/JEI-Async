@@ -6,23 +6,26 @@ import mezz.jei.api.recipe.RecipeType;
 import mezz.jei.api.recipe.category.IRecipeCategory;
 import mezz.jei.api.registration.IRecipeCategoryRegistration;
 import mezz.jei.common.util.ErrorUtil;
-import mezz.jei.library.runtime.JeiHelpers;
 import net.minecraft.resources.ResourceLocation;
 import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 public class RecipeCategoryRegistration implements IRecipeCategoryRegistration {
 	private final List<IRecipeCategory<?>> recipeCategories = new ArrayList<>();
 	private final Map<ResourceLocation, RecipeType<?>> recipeTypes = new HashMap<>();
-	private final JeiHelpers jeiHelpers;
+	private final IJeiHelpers jeiHelpers;
+	private final Consumer<Collection<IRecipeCategory<?>>> categoryListener;
 
-	public RecipeCategoryRegistration(JeiHelpers jeiHelpers) {
+	public RecipeCategoryRegistration(IJeiHelpers jeiHelpers, Consumer<Collection<IRecipeCategory<?>>> categoryListener) {
 		this.jeiHelpers = jeiHelpers;
+		this.categoryListener = categoryListener;
 	}
 
 	@Override
@@ -44,7 +47,7 @@ public class RecipeCategoryRegistration implements IRecipeCategoryRegistration {
 		}
 
 		Collections.addAll(this.recipeCategories, recipeCategories);
-		this.jeiHelpers.setRecipeCategories(Collections.unmodifiableCollection(this.recipeCategories));
+		this.categoryListener.accept(Collections.unmodifiableCollection(this.recipeCategories));
 	}
 
 	@Override

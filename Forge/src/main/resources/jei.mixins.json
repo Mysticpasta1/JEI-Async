@@ -6,9 +6,6 @@
   "mixins": [
     "IEMCProxyMixin"
   ],
-  "client": [
-    "JEIPluginMixin"
-  ],
   "injectors": {
     "defaultRequire": 1
   }
