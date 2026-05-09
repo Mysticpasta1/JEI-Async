@@ -3,6 +3,7 @@ package mezz.jei.gui.events;
 import com.mojang.blaze3d.systems.RenderSystem;
 import mezz.jei.api.gui.handlers.IGuiClickableArea;
 import mezz.jei.api.runtime.IScreenHelper;
+import mezz.jei.common.Internal;
 import mezz.jei.common.config.DebugConfig;
 import mezz.jei.common.gui.JeiTooltip;
 import mezz.jei.common.platform.IPlatformScreenHelper;
@@ -162,7 +163,7 @@ public class GuiEventHandler {
 	}
 
 	public boolean renderCompactPotionIndicators() {
-		return ingredientListOverlay.isListDisplayed();
+		return ingredientListOverlay.isListDisplayed() || Internal.isLoading();
 	}
 
 	private void drawDebugInfoForScreen(Screen screen, GuiGraphics guiGraphics) {

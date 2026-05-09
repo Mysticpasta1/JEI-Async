@@ -1,5 +1,6 @@
 package mezz.jei.forge.startup;
 
+import mezz.jei.common.Internal;
 import mezz.jei.forge.events.PermanentEventSubscriptions;
 import mezz.jei.gui.overlay.LoadingOverlayRenderer;
 import net.minecraft.client.Minecraft;
@@ -84,6 +85,12 @@ public class StartEventObserver {
 
 		subscriptions.register(ScreenEvent.Render.Post.class, event -> {
 			LoadingOverlayRenderer.renderLoadingOverlay(event.getScreen(), event.getGuiGraphics());
+		});
+
+		subscriptions.register(ScreenEvent.RenderInventoryMobEffects.class, event -> {
+			if (Internal.isLoading()) {
+				event.setCanceled(true);
+			}
 		});
 
 		subscriptions.register(ScreenEvent.Init.Pre.class, event -> {
