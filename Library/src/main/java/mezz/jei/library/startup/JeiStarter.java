@@ -53,7 +53,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 public final class JeiStarter {
 	private static final Logger LOGGER = LogManager.getLogger();
-	private static final String EXPECTED_VERSION = "19.27.0.340-async-9";
+	private static final String EXPECTED_VERSION = "19.27.0.340-async-10";
 	private static final ExecutorService LOADING_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
 		Thread t = new Thread(r, "JEI Background Loader");
 		t.setDaemon(true);

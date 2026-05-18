@@ -167,26 +167,21 @@ public class PluginCaller {
 		try (PluginCallerTimer timer = new PluginCallerTimer()) {
 			// Execute async-capable plugins in parallel on background threads
 			if (!asyncPlugins.isEmpty()) {
-				List<CompletableFuture<Void>> futures = asyncPlugins.stream()
-					.map(plugin -> CompletableFuture.runAsync(() -> {
+				executeOnMainThreadBlocking(() -> {
+					for (IModPlugin plugin : asyncPlugins) {
 						ResourceLocation pluginUid = plugin.getPluginUid();
-						PluginCallerTimerRunnable runnable = timer.begin(title, pluginUid);
+						PluginCallerTimerRunnable runnable = timer.begin(title + " [main-thread]", pluginUid);
 						try {
 							func.accept(plugin);
 						} catch (RuntimeException | LinkageError e) {
 							if (plugin instanceof VanillaPlugin) {
 								throw e;
 							}
-							LOGGER.warn("{} - plugin {} failed on background thread, will retry on main thread", title, pluginUid, e);
-							store.markIncompatible(plugin, title);
-							newlyFailed.add(plugin);
-						} finally {
-							timer.end(runnable);
+							LOGGER.error("Plugin {} failed on main thread: {} {}", pluginUid, plugin.getClass(), pluginUid, e);
 						}
-					}, EXECUTOR))
-					.toList();
-
-				CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+						timer.end(runnable);
+					}
+				});
 			}
 
 			// Batch all incompatible plugins into a single main-thread roundtrip
