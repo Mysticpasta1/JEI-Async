@@ -183,4 +183,8 @@ public class ScreenHelper implements IScreenHelper {
 		return this.guiContainerHandlers.getGuiClickableArea(guiContainer, guiMouseX, guiMouseY);
 	}
 
+	public void clear() {
+		this.cachedGhostIngredientHandlers.clear();
+	}
+
 }

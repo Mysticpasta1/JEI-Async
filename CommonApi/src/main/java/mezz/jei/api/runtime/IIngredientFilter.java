@@ -11,7 +11,17 @@ import java.util.List;
  * Use this interface to get information from and interact with it.
  * Get the instance from {@link IJeiRuntime#getIngredientFilter()}.
  */
-public interface IIngredientFilter {
+public interface IIngredientFilter extends AutoCloseable {
+	/**
+	 * Releases all resources held by this filter.
+	 * Called automatically when JEI stops.
+	 *
+	 * @since 16.0.0
+	 */
+	@Override
+	default void close() {
+	}
+
 	/**
 	 * Set the search filter string for the ingredient list.
 	 */

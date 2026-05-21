@@ -2,7 +2,6 @@ package mezz.jei.library.startup;
 
 import mezz.jei.api.IModPlugin;
 import mezz.jei.api.helpers.IColorHelper;
-import mezz.jei.api.recipe.transfer.IRecipeTransferHandlerHelper;
 import mezz.jei.api.recipe.transfer.IRecipeTransferManager;
 import mezz.jei.api.runtime.IIngredientManager;
 import mezz.jei.api.runtime.IScreenHelper;
@@ -20,9 +19,11 @@ import mezz.jei.common.util.RegistryUtil;
 import mezz.jei.core.util.LoggedTimer;
 import mezz.jei.library.color.ColorHelper;
 import mezz.jei.library.config.ColorNameConfig;
+import mezz.jei.common.util.SafeIngredientUtil;
 import mezz.jei.library.config.EditModeConfig;
 import mezz.jei.library.config.ModIdFormatConfig;
 import mezz.jei.library.config.RecipeCategorySortingConfig;
+import mezz.jei.library.ingredients.itemStacks.TypedItemStack;
 import mezz.jei.library.focus.FocusFactory;
 import mezz.jei.library.ingredients.subtypes.SubtypeManager;
 import mezz.jei.library.load.IncompatiblePluginStore;
@@ -37,16 +38,15 @@ import mezz.jei.library.recipes.DelegatingRecipeManager;
 import mezz.jei.library.recipes.RecipeManager;
 import mezz.jei.library.runtime.JeiHelpers;
 import mezz.jei.library.runtime.JeiRuntime;
-import mezz.jei.library.ingredients.subtypes.SubtypeInterpreters;
-import mezz.jei.library.load.registration.IngredientManagerBuilder;
-import mezz.jei.library.load.registration.SkeletonRegistration;
 import mezz.jei.library.runtime.DelegatingJeiHelpers;
+import mezz.jei.library.gui.helpers.ScreenHelper;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.sounds.SoundEvents;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.jetbrains.annotations.Nullable;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -54,15 +54,24 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 public final class JeiStarter {
 	private static final Logger LOGGER = LogManager.getLogger();
-	private static final ExecutorService LOADING_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
-		Thread t = new Thread(r, "JEI Background Loader");
-		t.setDaemon(true);
-		return t;
-	});
-	private static final String EXPECTED_VERSION = "15.20.0.130-async-26"; // Current JEI-Async version
+	@Nullable
+	private static ExecutorService loadingExecutor;
+
+	private static synchronized ExecutorService getLoadingExecutor() {
+		if (loadingExecutor == null || loadingExecutor.isShutdown()) {
+			loadingExecutor = Executors.newSingleThreadExecutor(r -> {
+				Thread t = new Thread(r, "JEI Background Loader");
+				t.setDaemon(true);
+				return t;
+			});
+		}
+		return loadingExecutor;
+	}
+	private static final String EXPECTED_VERSION = "15.20.0.130-async-27"; // Current JEI-Async version
 
 	private final StartData data;
 	private final List<IModPlugin> plugins;
@@ -103,9 +112,9 @@ public final class JeiStarter {
 		this.data = data;
 		this.plugins = data.plugins();
 		this.vanillaPlugin = PluginHelper.getPluginWithClass(VanillaPlugin.class, plugins)
-			.orElseThrow(() -> new IllegalStateException("vanilla plugin not found"));
+				.orElseThrow(() -> new IllegalStateException("vanilla plugin not found"));
 		JeiInternalPlugin jeiInternalPlugin = PluginHelper.getPluginWithClass(JeiInternalPlugin.class, plugins)
-			.orElse(null);
+				.orElse(null);
 		PluginHelper.sortPlugins(plugins, vanillaPlugin, jeiInternalPlugin);
 
 		Path configDir = Services.PLATFORM.getConfigHelper().createJeiConfigDir();
@@ -193,7 +202,7 @@ public final class JeiStarter {
 			} finally {
 				isStarting = false;
 			}
-		}, LOADING_EXECUTOR);
+		}, getLoadingExecutor());
 		loadingFuture.set(future);
 	}
 
@@ -215,7 +224,10 @@ public final class JeiStarter {
 		totalTime.start("Starting JEI (background)");
 		Internal.setLoadingProgress("Initializing...");
 
-		JeiRuntime jeiRuntime = buildRuntime(true);
+		// Provide a main-thread executor so sync-only plugins (those not implementing
+		// IAsyncCompatiblePlugin) can have their registration methods dispatched to the
+		// main thread, ensuring they can safely access Minecraft client state.
+		JeiRuntime jeiRuntime = buildRuntime(true, r -> Minecraft.getInstance().execute(r));
 
 		if (cancelled) {
 			LOGGER.info("JEI background loading was cancelled");
@@ -231,60 +243,11 @@ public final class JeiStarter {
 				return;
 			}
 			Internal.setRuntime(jeiRuntime);
-PluginCaller.callPlugins("Sending Runtime", plugins, p -> p.onRuntimeAvailable(jeiRuntime), false, incompatiblePluginStore);
 			Internal.setLoadingProgress(null);
 			LOGGER.info("JEI has finished background loading and is now available.");
 			playLoadCompleteSound();
-		});
-	}
-
-	private void doPreLoadingSync() {
-		LOGGER.info("Performing JEI pre-registration for sync plugins...");
-		IColorHelper colorHelper = new ColorHelper(colorNameConfig);
-		SubtypeManager skeletonSubtypeManager = new SubtypeManager(new SubtypeInterpreters());
-		IIngredientManager skeletonIngredientManager = new IngredientManagerBuilder(skeletonSubtypeManager, colorHelper).build();
-		FocusFactory skeletonFocusFactory = new FocusFactory(skeletonIngredientManager);
-
-		Path configDir = Services.PLATFORM.getConfigHelper().createJeiConfigDir();
-		EditModeConfig skeletonEditModeConfig = new EditModeConfig(new EditModeConfig.FileSerializer(configDir.resolve("blacklist.cfg")), skeletonIngredientManager);
-
-		JeiHelpers skeletonHelpers = PluginLoader.createJeiHelpers(modIdFormatConfig, colorHelper, skeletonEditModeConfig, skeletonFocusFactory, skeletonIngredientManager, skeletonSubtypeManager);
-		delegatingJeiHelpers.setDelegate(skeletonHelpers);
-		delegatingRecipeManager.setDelegate(null);
-
-		IScreenHelper skeletonScreenHelper = new mezz.jei.library.load.registration.GuiHandlerRegistration(delegatingJeiHelpers).createGuiScreenHelper(skeletonIngredientManager);
-		IRecipeTransferHandlerHelper skeletonTransferHelper = new mezz.jei.library.transfer.RecipeTransferHandlerHelper(skeletonHelpers.getStackHelper());
-
-		SkeletonRegistration skeletonRegistration = new SkeletonRegistration(
-			delegatingJeiHelpers,
-			skeletonIngredientManager,
-			delegatingRecipeManager,
-			skeletonEditModeConfig,
-			skeletonScreenHelper,
-			skeletonTransferHelper
-		);
-
-		// Filter to only sync plugins before dispatching
-		List<IModPlugin> syncOnlyPlugins = plugins.stream()
-			.filter(p -> !(p instanceof mezz.jei.api.IAsyncCompatiblePlugin async && async.canExecuteAsync()))
-			.toList();
-
-		// Only call on sync plugins to set their static fields early on the main thread
-		PluginCaller.callOnPlugins("Pre-registering sync plugins", syncOnlyPlugins, p -> {
-			try {
-				p.registerCategories(skeletonRegistration);
-				p.registerRecipes(skeletonRegistration);
-				p.registerVanillaCategoryExtensions(skeletonRegistration);
-				p.registerRecipeTransferHandlers(skeletonRegistration);
-				p.registerRecipeCatalysts(skeletonRegistration);
-				p.registerGuiHandlers(skeletonRegistration);
-				p.registerAdvanced(skeletonRegistration);
-				p.registerRuntime(skeletonRegistration);
-			} catch (Exception e) {
-				// Some plugins might throw exceptions if they expect full registration objects
-				// We ignore them as this is a best-effort pre-registration
-				LOGGER.debug("Failed to pre-register plugin {}: {}", p.getPluginUid(), e.getMessage());
-			}
+			// Dispatch onRuntimeAvailable non-blocking to avoid blocking the main thread
+			PluginCaller.callOnPluginsNonBlocking("Sending Runtime", plugins, p -> p.onRuntimeAvailable(jeiRuntime));
 		});
 	}
 
@@ -299,6 +262,10 @@ PluginCaller.callPlugins("Sending Runtime", plugins, p -> p.onRuntimeAvailable(j
 	}
 
 	private JeiRuntime buildRuntime(boolean useAsyncFallback) {
+		return buildRuntime(useAsyncFallback, null);
+	}
+
+	private JeiRuntime buildRuntime(boolean useAsyncFallback, @Nullable Consumer<Runnable> mainThreadRunner) {
 		loadingState = LoadingState.LOADING_SUBTYPES;
 		if (!hidden) {
 			Internal.setLoadingProgress("Loading subtypes...");
@@ -338,13 +305,14 @@ PluginCaller.callPlugins("Sending Runtime", plugins, p -> p.onRuntimeAvailable(j
 			Internal.setLoadingProgress("Loading categories & recipes...");
 		}
 		RecipeManager recipeManager = PluginLoader.createRecipeManager(
-			plugins,
-			vanillaPlugin,
-			recipeCategorySortingConfig,
-			delegatingJeiHelpers,
-			ingredientManager,
-			useAsyncFallback,
-			incompatiblePluginStore
+				plugins,
+				vanillaPlugin,
+				recipeCategorySortingConfig,
+				delegatingJeiHelpers,
+				ingredientManager,
+				useAsyncFallback,
+				incompatiblePluginStore,
+				null
 		);
 		delegatingRecipeManager.setDelegate(recipeManager);
 
@@ -357,9 +325,9 @@ PluginCaller.callPlugins("Sending Runtime", plugins, p -> p.onRuntimeAvailable(j
 			Internal.setLoadingProgress("Building runtime...");
 		}
 		IRecipeTransferManager recipeTransferManager = PluginLoader.createRecipeTransferManager(
-			plugins,
-			delegatingJeiHelpers,
-			data.serverConnection()
+				plugins,
+				delegatingJeiHelpers,
+				data.serverConnection()
 		);
 
 		LoggedTimer timer = new LoggedTimer();
@@ -367,29 +335,29 @@ PluginCaller.callPlugins("Sending Runtime", plugins, p -> p.onRuntimeAvailable(j
 		IScreenHelper screenHelper = PluginLoader.createGuiScreenHelper(plugins, delegatingJeiHelpers, ingredientManager);
 
 		RuntimeRegistration runtimeRegistration = new RuntimeRegistration(
-			recipeManager,
-			delegatingJeiHelpers,
-			editModeConfig,
-			ingredientManager,
-			recipeTransferManager,
-			screenHelper
+				recipeManager,
+				delegatingJeiHelpers,
+				editModeConfig,
+				ingredientManager,
+				recipeTransferManager,
+				screenHelper
 		);
 
 		PluginCaller.callPlugins("Registering Runtime", plugins, p -> p.registerRuntime(runtimeRegistration), useAsyncFallback, incompatiblePluginStore);
 
 		JeiRuntime jeiRuntime = new JeiRuntime(
-			recipeManager,
-			ingredientManager,
-			data.keyBindings(),
-			delegatingJeiHelpers,
-			screenHelper,
-			recipeTransferManager,
-			editModeConfig,
-			runtimeRegistration.getIngredientListOverlay(),
-			runtimeRegistration.getBookmarkOverlay(),
-			runtimeRegistration.getRecipesGui(),
-			runtimeRegistration.getIngredientFilter(),
-			configManager
+				recipeManager,
+				ingredientManager,
+				data.keyBindings(),
+				delegatingJeiHelpers,
+				screenHelper,
+				recipeTransferManager,
+				editModeConfig,
+				runtimeRegistration.getIngredientListOverlay(),
+				runtimeRegistration.getBookmarkOverlay(),
+				runtimeRegistration.getRecipesGui(),
+				runtimeRegistration.getIngredientFilter(),
+				configManager
 		);
 		timer.stop();
 
@@ -420,10 +388,48 @@ PluginCaller.callPlugins("Sending Runtime", plugins, p -> p.onRuntimeAvailable(j
 			LOGGER.info("Cancelled JEI background loading");
 		}
 
+		// Ensure pending onRuntimeAvailable callbacks complete before onRuntimeUnavailable
+		// to prevent async plugins from re-storing the old runtime reference after it's cleared.
+		PluginCaller.waitForPendingRuntimeFuture();
+
 		List<IModPlugin> plugins = data.plugins();
 		PluginCaller.callPlugins("Sending Runtime Unavailable", plugins, IModPlugin::onRuntimeUnavailable, false, incompatiblePluginStore);
+
+		// Must close/clear runtime components AFTER onRuntimeUnavailable so plugins can still access them.
+		Internal.getOptionalJeiRuntime().ifPresent(runtime -> {
+			try {
+				runtime.getIngredientFilter().close();
+			} catch (Exception e) {
+				LOGGER.error("Failed to close IngredientFilter", e);
+			}
+			try {
+				IScreenHelper screenHelper = runtime.getScreenHelper();
+				if (screenHelper instanceof ScreenHelper sh) {
+					sh.clear();
+				}
+			} catch (Exception e) {
+				LOGGER.error("Failed to clear ScreenHelper", e);
+			}
+		});
+
 		Internal.setRuntime(null);
 		RegistryUtil.setRegistryAccess(null);
+
+		// Release references to old runtime data to prevent memory leaks
+		delegatingJeiHelpers.setDelegate(null);
+		delegatingRecipeManager.setDelegate(null);
+
+		// Shutdown executors to release threads and any captured references
+		synchronized (JeiStarter.class) {
+			if (loadingExecutor != null && !loadingExecutor.isShutdown()) {
+				loadingExecutor.shutdownNow();
+			}
+		}
+		PluginCaller.shutdown();
+
+		// Clear static caches to prevent memory leaks across world loads
+		SafeIngredientUtil.clearCrashingCache();
+		TypedItemStack.clearCache();
 	}
 
 	public LoadingState getLoadingState() {

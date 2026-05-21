@@ -37,6 +37,10 @@ public class WeakList<T> {
 		}
 	}
 
+	public void clear() {
+		list = null;
+	}
+
 	public boolean isEmpty() {
 		if (list == null) {
 			return true;

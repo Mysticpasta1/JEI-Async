@@ -40,6 +40,12 @@ public final class SafeIngredientUtil {
 	private SafeIngredientUtil() {
 	}
 
+	public static void clearCrashingCache() {
+		CRASHING_INGREDIENT_BATCH_RENDERERS.clear();
+		CRASHING_INGREDIENT_RENDERERS.clear();
+		CRASHING_INGREDIENT_TOOLTIPS.clear();
+	}
+
 	public static <T> void getTooltip(ITooltipBuilder tooltip, IIngredientManager ingredientManager, IIngredientRenderer<T> ingredientRenderer, ITypedIngredient<T> typedIngredient) {
 		Minecraft minecraft = Minecraft.getInstance();
 		TooltipFlag.Default tooltipFlag = minecraft.options.advancedItemTooltips ? TooltipFlag.Default.ADVANCED : TooltipFlag.Default.NORMAL;

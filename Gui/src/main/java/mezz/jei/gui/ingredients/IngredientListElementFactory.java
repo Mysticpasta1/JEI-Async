@@ -4,6 +4,7 @@ import mezz.jei.api.helpers.IModIdHelper;
 import mezz.jei.api.ingredients.IIngredientType;
 import mezz.jei.api.ingredients.ITypedIngredient;
 import mezz.jei.api.runtime.IIngredientManager;
+import mezz.jei.core.util.RegistryLock;
 import mezz.jei.common.config.DebugConfig;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -28,7 +29,11 @@ public final class IngredientListElementFactory {
 		if (DebugConfig.isAsyncLoadingEnabled()) {
 			LOGGER.info("Building ingredient list in parallel...");
 			return ingredientTypes.parallelStream()
-				.flatMap(ingredientType -> createBaseListForType(ingredientManager, ingredientType, modIdHelper).stream())
+				.flatMap(ingredientType -> {
+					synchronized (RegistryLock.get()) {
+						return createBaseListForType(ingredientManager, ingredientType, modIdHelper).stream();
+					}
+				})
 				.collect(Collectors.toList());
 		}
 

@@ -7,7 +7,7 @@ import mezz.jei.common.util.ErrorUtil;
 
 import java.util.List;
 
-public class IngredientFilterApi implements IIngredientFilter, AutoCloseable {
+public class IngredientFilterApi implements IIngredientFilter {
 	private final IngredientFilter ingredientFilter;
 	private final IFilterTextSource filterTextSource;
 

@@ -123,6 +123,11 @@ public class ElementSearchLowMem implements IElementSearch {
 	}
 
 	@Override
+	public void clear() {
+		this.elementInfoList.clear();
+	}
+
+	@Override
 	public void logStatistics() {
 		LOGGER.info("ElementSearchLowMem Element Count: {}", this.elementInfoList.size());
 	}

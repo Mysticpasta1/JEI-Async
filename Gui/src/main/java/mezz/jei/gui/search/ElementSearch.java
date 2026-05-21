@@ -5,18 +5,15 @@ import mezz.jei.api.ingredients.ITypedIngredient;
 import mezz.jei.api.ingredients.subtypes.UidContext;
 import mezz.jei.api.runtime.IIngredientManager;
 import mezz.jei.common.config.DebugConfig;
-import mezz.jei.core.search.CombinedSearchables;
-import mezz.jei.core.search.ISearchStorage;
-import mezz.jei.core.search.ISearchable;
-import mezz.jei.core.search.PrefixInfo;
-import mezz.jei.core.search.PrefixedSearchable;
-import mezz.jei.core.search.SearchMode;
+import mezz.jei.core.search.*;
 import mezz.jei.gui.ingredients.IListElement;
 import mezz.jei.gui.ingredients.IListElementInfo;
+import net.minecraft.client.Minecraft;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.IdentityHashMap;
@@ -33,12 +30,20 @@ public class ElementSearch implements IElementSearch {
 	private final CombinedSearchables<IListElement<?>> combinedSearchables = new CombinedSearchables<>();
 	private final Map<Object, IListElement<?>> allElements = new ConcurrentHashMap<>();
 
+	private final Object tooltipLock = new Object();
+	private final List<IListElementInfo<?>> deferredTooltipInfos = new ArrayList<>();
+	@Nullable
+	private PrefixedSearchable<IListElementInfo<?>, IListElement<?>> tooltipSearchable = null;
+
 	public ElementSearch(ElementPrefixParser elementPrefixParser) {
 		for (PrefixInfo<IListElementInfo<?>, IListElement<?>> prefixInfo : elementPrefixParser.allPrefixInfos()) {
 			ISearchStorage<IListElement<?>> storage = prefixInfo.createStorage();
 			var prefixedSearchable = new PrefixedSearchable<>(storage, prefixInfo);
 			this.prefixedSearchables.put(prefixInfo, prefixedSearchable);
 			this.combinedSearchables.addSearchable(prefixedSearchable);
+			if (prefixInfo.getPrefix() == '#') {
+				this.tooltipSearchable = prefixedSearchable;
+			}
 		}
 	}
 
@@ -70,15 +75,32 @@ public class ElementSearch implements IElementSearch {
 		IListElement<T> element = info.getElement();
 		Object uid = getUid(element.getTypedIngredient(), ingredientManager);
 		this.allElements.put(uid, element);
-		for (PrefixedSearchable<IListElementInfo<?>, IListElement<?>> prefixedSearchable : this.prefixedSearchables.values()) {
-			SearchMode searchMode = prefixedSearchable.getMode();
-			if (searchMode != SearchMode.DISABLED) {
-				Collection<String> strings = prefixedSearchable.getStrings(info);
-				ISearchStorage<IListElement<?>> storage = prefixedSearchable.getSearchStorage();
-				for (String string : strings) {
-					storage.put(string, element);
-				}
+		for (Map.Entry<PrefixInfo<IListElementInfo<?>, IListElement<?>>, PrefixedSearchable<IListElementInfo<?>, IListElement<?>>> entry : this.prefixedSearchables.entrySet()) {
+			PrefixInfo<IListElementInfo<?>, IListElement<?>> prefixInfo = entry.getKey();
+			PrefixedSearchable<IListElementInfo<?>, IListElement<?>> prefixedSearchable = entry.getValue();
+			if (prefixedSearchable.getMode() == SearchMode.DISABLED) {
+				continue;
 			}
+			if (isBackgroundThread() && prefixInfo.getPrefix() == '#') {
+				continue;
+			}
+			Collection<String> strings = prefixedSearchable.getStrings(info);
+			ISearchStorage<IListElement<?>> storage = prefixedSearchable.getSearchStorage();
+			for (String string : strings) {
+				storage.put(string, element);
+			}
+		}
+	}
+
+	private static boolean isBackgroundThread() {
+		try {
+			Minecraft mc = Minecraft.getInstance();
+			if (mc == null) {
+				return false;
+			}
+			return !mc.isSameThread();
+		} catch (Exception e) {
+			return false;
 		}
 	}
 
@@ -93,6 +115,10 @@ public class ElementSearch implements IElementSearch {
 	}
 
 	public void addAll(Collection<IListElementInfo<?>> infos, IIngredientManager ingredientManager, @Nullable SearchStringCache cache) {
+		if (isBackgroundThread()) {
+			addAllBackground(infos, ingredientManager);
+			return;
+		}
 		if (cache != null && cache.isCacheAvailable()) {
 			addAllWithCache(infos, ingredientManager, cache);
 		} else if (DebugConfig.isParallelSearchEnabled() && infos.size() >= 100) {
@@ -157,14 +183,77 @@ public class ElementSearch implements IElementSearch {
 			this.allElements.put(uid, info.getElement());
 		});
 
-		this.prefixedSearchables.values().parallelStream()
-			.filter(p -> p.getMode() != SearchMode.DISABLED)
-			.forEach(prefixedSearchable -> {
-				ISearchStorage<IListElement<?>> storage = prefixedSearchable.getSearchStorage();
-				for (IListElementInfo<?> info : infos) {
-					prefixedSearchable.getStrings(info).forEach(s -> storage.put(s, info.getElement()));
-				}
-			});
+		// Note: getStrings() calls tooltip generation which fires Forge events and
+		// touches Minecraft thread-local state. This MUST run on the calling thread,
+		// NOT on ForkJoinPool threads, to avoid ClassNotFoundException and
+		// ConcurrentModificationException in mod event handlers.
+		for (PrefixedSearchable<IListElementInfo<?>, IListElement<?>> prefixedSearchable : this.prefixedSearchables.values()) {
+			if (prefixedSearchable.getMode() == SearchMode.DISABLED) {
+				continue;
+			}
+			ISearchStorage<IListElement<?>> storage = prefixedSearchable.getSearchStorage();
+			for (IListElementInfo<?> info : infos) {
+				prefixedSearchable.getStrings(info).forEach(s -> storage.put(s, info.getElement()));
+			}
+		}
+	}
+
+	private void addAllBackground(Collection<IListElementInfo<?>> infos, IIngredientManager ingredientManager) {
+		infos.parallelStream().forEach(info -> {
+			Object uid = getUid(info.getTypedIngredient(), ingredientManager);
+			this.allElements.put(uid, info.getElement());
+		});
+
+		for (Map.Entry<PrefixInfo<IListElementInfo<?>, IListElement<?>>, PrefixedSearchable<IListElementInfo<?>, IListElement<?>>> entry : this.prefixedSearchables.entrySet()) {
+			PrefixInfo<IListElementInfo<?>, IListElement<?>> prefixInfo = entry.getKey();
+			PrefixedSearchable<IListElementInfo<?>, IListElement<?>> prefixedSearchable = entry.getValue();
+			if (prefixedSearchable.getMode() == SearchMode.DISABLED) {
+				continue;
+			}
+			if (prefixInfo.getPrefix() == '#') {
+				continue;
+			}
+			ISearchStorage<IListElement<?>> storage = prefixedSearchable.getSearchStorage();
+			for (IListElementInfo<?> info : infos) {
+				prefixedSearchable.getStrings(info).forEach(s -> storage.put(s, info.getElement()));
+			}
+		}
+
+		synchronized (this.tooltipLock) {
+			this.deferredTooltipInfos.addAll(infos);
+		}
+	}
+
+	@Override
+	public void processDeferredTooltips() {
+		List<IListElementInfo<?>> infos;
+		synchronized (this.tooltipLock) {
+			if (this.deferredTooltipInfos.isEmpty()) {
+				return;
+			}
+			infos = new ArrayList<>(this.deferredTooltipInfos);
+			this.deferredTooltipInfos.clear();
+		}
+
+		if (isBackgroundThread()) {
+			Minecraft mc = Minecraft.getInstance();
+			if (mc != null) {
+				mc.execute(this::processDeferredTooltips);
+			}
+			return;
+		}
+
+		if (this.tooltipSearchable == null || this.tooltipSearchable.getMode() == SearchMode.DISABLED) {
+			return;
+		}
+		ISearchStorage<IListElement<?>> storage = this.tooltipSearchable.getSearchStorage();
+		for (IListElementInfo<?> info : infos) {
+			try {
+				this.tooltipSearchable.getStrings(info).forEach(s -> storage.put(s, info.getElement()));
+			} catch (Exception e) {
+				LOGGER.debug("Failed to process deferred tooltip search strings for ingredient", e);
+			}
+		}
 	}
 
 	@Override
@@ -184,6 +273,17 @@ public class ElementSearch implements IElementSearch {
 	@Override
 	public Collection<IListElement<?>> getAllIngredients() {
 		return Collections.unmodifiableCollection(allElements.values());
+	}
+
+	@Override
+	public void clear() {
+		this.allElements.clear();
+		this.combinedSearchables.clear();
+		this.prefixedSearchables.clear();
+		synchronized (this.tooltipLock) {
+			this.deferredTooltipInfos.clear();
+		}
+		this.tooltipSearchable = null;
 	}
 
 	@Override

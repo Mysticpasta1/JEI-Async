@@ -25,6 +25,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.Nullable;
 
+import mezz.jei.core.util.RegistryLock;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -102,6 +103,8 @@ public class IngredientFilter implements
 			this.elementSearch.logStatistics();
 		}
 
+		this.elementSearch.processDeferredTooltips();
+
 		this.filterTextSource.addListener(filterText -> {
 			invalidateCache();
 			notifyListenersOfChange();
@@ -112,8 +115,6 @@ public class IngredientFilter implements
 		// Pre-build the sorted ingredient list cache on the current thread (background thread during async loading)
 		// to avoid a main-thread freeze when the user first opens their inventory.
 		getElements();
-
-		clientToggleState.addEditModeToggleListener(this);
 	}
 
 	@Override
@@ -126,6 +127,9 @@ public class IngredientFilter implements
 			}
 			tasks.clear();
 		}
+		this.elementSearch.clear();
+		this.listeners.clear();
+		this.ingredientListCached = null;
 	}
 
 	private static IElementSearch createElementSearch(IClientConfig clientConfig, ElementPrefixParser elementPrefixParser) {
@@ -142,14 +146,16 @@ public class IngredientFilter implements
 
 	public synchronized void addIngredients(Collection<IListElementInfo<?>> ingredients) {
 		if (closed) return;
-		// Process hidden states in parallel if the list is large
+		// Process hidden states in parallel if the list is large (guarded by RegistryLock)
 		Stream<IListElementInfo<?>> stream = (DebugConfig.isParallelSearchEnabled())
 				? ingredients.parallelStream()
 				: ingredients.stream();
 
 		stream.forEach(i -> {
 			if (closed) return;
-			updateHiddenState(i.getElement());
+			synchronized (RegistryLock.get()) {
+				updateHiddenState(i.getElement());
+			}
 		});
 
 		if (closed) return;

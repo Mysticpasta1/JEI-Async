@@ -124,6 +124,7 @@ public class RecipeMap {
 	private <T> void addRecipeParallel(RecipeType<T> recipeType, T recipe, Collection<ITypedIngredient<?>> ingredients) {
 		try {
 			// Extract ingredient UIDs in parallel
+			// Note: getIngredientUidSafe reads NBT/data, not Forge registries, so no RegistryLock needed
 			Set<Object> ingredientUids = ingredients.parallelStream()
 				.map(this::getIngredientUidSafe)
 				.filter(java.util.Objects::nonNull)
