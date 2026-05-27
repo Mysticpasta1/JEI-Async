@@ -3,9 +3,7 @@
   "minVersion": "0.8",
   "package": "mezz.jei.forge.mixin",
   "compatibilityLevel": "JAVA_17",
-  "mixins": [
-    "IEMCProxyMixin"
-  ],
+  "mixins": [],
   "injectors": {
     "defaultRequire": 1
   }

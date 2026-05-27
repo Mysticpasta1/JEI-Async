@@ -79,7 +79,6 @@ dependencies {
 		name = "forge",
 		version = "${minecraftVersion}-${forgeVersion}"
 	)
-	implementation(fg.deobf("curse.maven:projecte-226410:4901949"))
 	dependencyProjects.forEach {
 		implementation(it)
 	}

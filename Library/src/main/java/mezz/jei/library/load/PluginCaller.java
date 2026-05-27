@@ -4,7 +4,6 @@ import com.google.common.base.Stopwatch;
 import mezz.jei.api.IAsyncCompatiblePlugin;
 import mezz.jei.api.IModPlugin;
 import mezz.jei.common.config.DebugConfig;
-import mezz.jei.library.plugins.vanilla.VanillaPlugin;
 import net.minecraft.resources.ResourceLocation;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -17,8 +16,8 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 public class PluginCaller {
 	private static final Logger LOGGER = LogManager.getLogger();
@@ -38,20 +37,6 @@ public class PluginCaller {
 		return executor;
 	}
 
-	public static void callPluginsAsync(
-		String title,
-		List<IModPlugin> plugins,
-		Consumer<IModPlugin> func,
-		boolean useAsyncFallback,
-		@Nullable IncompatiblePluginStore incompatiblePluginStore
-	) {
-		if (useAsyncFallback && incompatiblePluginStore != null) {
-			callOnPluginsWithFallback(title, plugins, func, incompatiblePluginStore);
-		} else {
-			callOnPlugins(title, plugins, func);
-		}
-	}
-
 	public static void callPlugins(
 		String title,
 		List<IModPlugin> plugins,
@@ -59,111 +44,33 @@ public class PluginCaller {
 		boolean useAsyncFallback,
 		@Nullable IncompatiblePluginStore incompatiblePluginStore
 	) {
-		callPluginsAsync(title, plugins, func, useAsyncFallback, incompatiblePluginStore);
+		callPlugins(title, plugins, func, useAsyncFallback, incompatiblePluginStore, null);
 	}
 
-	public static void callOnPlugins(String title, List<IModPlugin> plugins, Consumer<IModPlugin> func) {
-		callOnPlugins(title, plugins, func, null);
+	public static void callPlugins(
+		String title,
+		List<IModPlugin> plugins,
+		Consumer<IModPlugin> func,
+		boolean useAsyncFallback,
+		@Nullable IncompatiblePluginStore incompatiblePluginStore,
+		@Nullable Consumer<Runnable> mainThreadRunner
+	) {
+		if (useAsyncFallback && incompatiblePluginStore != null) {
+			callOnPluginsWithFallback(title, plugins, func, incompatiblePluginStore, mainThreadRunner);
+		} else {
+			callOnPlugins(title, plugins, func, mainThreadRunner, incompatiblePluginStore);
+		}
 	}
 
-	public static void callOnPlugins(String title, List<IModPlugin> plugins, Consumer<IModPlugin> func, @Nullable Consumer<Runnable> mainThreadRunner) {
-		LOGGER.info("{}...", title);
-		Stopwatch stopwatch = Stopwatch.createStarted();
+	public static void callOnPlugins(String title, List<IModPlugin> plugins, Consumer<IModPlugin> func, @Nullable Consumer<Runnable> mainThreadRunner, @Nullable IncompatiblePluginStore store) {
+		callOnPlugins(title, plugins, func,
+			mainThreadRunner != null ? p -> mainThreadRunner : p -> null,
+			store
+		);
+	}
 
-		// If async loading is disabled, use simple synchronous execution
-		if (!DebugConfig.isAsyncLoadingEnabled()) {
-			for (IModPlugin plugin : plugins) {
-				ResourceLocation pluginLocation = plugin.getPluginUid();
-				try {
-					if (plugin instanceof VanillaPlugin) {
-						LOGGER.info("Calling VanillaPlugin...");
-					}
-					func.accept(plugin);
-				} catch (Throwable e) {
-					LOGGER.error("Plugin failed: {}", pluginLocation, e);
-				}
-			}
-			LOGGER.info("{} took {}", title, stopwatch);
-			return;
-		}
-
-		// Separate plugins into async-safe and sync-only
-		List<IModPlugin> syncPlugins = new ArrayList<>();
-		List<IModPlugin> asyncPlugins = new ArrayList<>();
-
-		for (IModPlugin plugin : plugins) {
-			if (plugin instanceof IAsyncCompatiblePlugin asyncPlugin && asyncPlugin.canExecuteAsync()) {
-				asyncPlugins.add(plugin);
-			} else {
-				syncPlugins.add(plugin);
-			}
-		}
-
-		// 1. Start all async plugins
-		List<CompletableFuture<Void>> futures = asyncPlugins.stream()
-				.map(plugin -> CompletableFuture.runAsync(() -> {
-					try {
-						func.accept(plugin);
-					} catch (Throwable e) {
-						LOGGER.error("Async plugin {} failed during {}:", plugin.getPluginUid(), title, e);
-						throw e;
-					}
-				}, getExecutor()))
-				.toList();
-
-		// 2. Execute sync-only plugins (skip async plugins to avoid double execution)
-		//    If mainThreadRunner is provided, dispatch sync plugins to the main thread
-		//    to ensure any client-only state access (Minecraft.getInstance(), etc.) is safe.
-		for (IModPlugin plugin : syncPlugins) {
-			ResourceLocation pluginLocation = plugin.getPluginUid();
-			if (mainThreadRunner != null) {
-				CompletableFuture<Void> syncFuture = new CompletableFuture<>();
-				mainThreadRunner.accept(() -> {
-					try {
-						if (plugin instanceof VanillaPlugin) {
-							LOGGER.info("Calling VanillaPlugin...");
-						}
-						func.accept(plugin);
-					} catch (Throwable e) {
-						LOGGER.error("Plugin failed: {}", pluginLocation, e);
-					} finally {
-						syncFuture.complete(null);
-					}
-				});
-				try {
-					syncFuture.get();
-				} catch (InterruptedException e) {
-					Thread.currentThread().interrupt();
-					LOGGER.error("Interrupted while dispatching sync plugin {} to main thread:", pluginLocation, e);
-				} catch (ExecutionException e) {
-					LOGGER.error("Sync plugin {} failed on main thread:", pluginLocation, e.getCause());
-				}
-			} else {
-				try {
-					if (plugin instanceof VanillaPlugin) {
-						LOGGER.info("Calling VanillaPlugin...");
-					}
-					func.accept(plugin);
-				} catch (Throwable e) {
-					LOGGER.error("Plugin failed: {}", pluginLocation, e);
-				}
-			}
-		}
-
-		// 3. Wait for all async plugins to finish
-		try {
-			CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).get(5, TimeUnit.MINUTES);
-		} catch (InterruptedException e) {
-			Thread.currentThread().interrupt();
-			LOGGER.error("Interrupted while waiting for async tasks during {}:", title, e);
-		} catch (ExecutionException e) {
-			LOGGER.error("Async tasks failed during {}:", title, e.getCause());
-		} catch (TimeoutException e) {
-			LOGGER.error("Async tasks timed out after 5 minutes during {}:", title);
-		}
-
-		stopwatch.stop();
-		LOGGER.info("{} took {}", title, stopwatch);
+	public static void callOnPlugins(String title, List<IModPlugin> plugins, Consumer<IModPlugin> func, @Nullable Function<IModPlugin, Consumer<Runnable>> mainThreadRunnerResolver, @Nullable IncompatiblePluginStore store) {
+		callOnPluginsInternal(title, plugins, func, mainThreadRunnerResolver, store, true);
 	}
 
 	/**
@@ -172,7 +79,11 @@ public class PluginCaller {
 	 * Unlike callOnPlugins, it does NOT block waiting for async plugin futures.
 	 * Use this when calling from the main/render thread to avoid blocking ticks.
 	 */
-	public static void callOnPluginsNonBlocking(String title, List<IModPlugin> plugins, Consumer<IModPlugin> func) {
+	public static void callOnPluginsNonBlocking(String title, List<IModPlugin> plugins, Consumer<IModPlugin> func, @Nullable IncompatiblePluginStore store, @Nullable Function<IModPlugin, Consumer<Runnable>> mainThreadRunnerResolver) {
+		callOnPluginsInternal(title, plugins, func, mainThreadRunnerResolver, store, false);
+	}
+
+	private static void callOnPluginsInternal(String title, List<IModPlugin> plugins, Consumer<IModPlugin> func, @Nullable Function<IModPlugin, Consumer<Runnable>> mainThreadRunnerResolver, @Nullable IncompatiblePluginStore store, boolean blocking) {
 		LOGGER.info("{}...", title);
 		Stopwatch stopwatch = Stopwatch.createStarted();
 
@@ -180,9 +91,6 @@ public class PluginCaller {
 			for (IModPlugin plugin : plugins) {
 				ResourceLocation pluginLocation = plugin.getPluginUid();
 				try {
-					if (plugin instanceof VanillaPlugin) {
-						LOGGER.info("Calling VanillaPlugin...");
-					}
 					func.accept(plugin);
 				} catch (Throwable e) {
 					LOGGER.error("Plugin failed: {}", pluginLocation, e);
@@ -196,66 +104,112 @@ public class PluginCaller {
 		List<IModPlugin> asyncPlugins = new ArrayList<>();
 
 		for (IModPlugin plugin : plugins) {
-			if (plugin instanceof IAsyncCompatiblePlugin asyncPlugin && asyncPlugin.canExecuteAsync()) {
+			if (plugin instanceof IAsyncCompatiblePlugin asyncPlugin && asyncPlugin.canExecuteAsync() && (store != null && !store.isIncompatible(plugin, title))) {
 				asyncPlugins.add(plugin);
 			} else {
 				syncPlugins.add(plugin);
 			}
 		}
 
-		// 1. Dispatch async plugins to executor
-		List<CompletableFuture<Void>> futures = asyncPlugins.stream()
+		List<CompletableFuture<Void>> futures = asyncPlugins.parallelStream()
 				.map(plugin -> CompletableFuture.runAsync(() -> {
 					try {
 						func.accept(plugin);
+					} catch (net.minecraft.server.RunningOnDifferentThreadException e) {
+						LOGGER.warn("Plugin {} ran on wrong thread during {} (not async-safe, will retry synchronously):", plugin.getPluginUid(), title);
+						if (store != null) {
+							store.markIncompatible(plugin, title);
+						}
 					} catch (Throwable e) {
-						LOGGER.error("Async plugin {} failed during {}:", plugin.getPluginUid(), title, e);
+						LOGGER.warn("Async plugin {} failed during {} (will retry synchronously):", plugin.getPluginUid(), title, e);
+						if (store != null) {
+							store.markIncompatible(plugin, title);
+						}
 					}
 				}, getExecutor()))
 				.toList();
 
-		// 2. Execute sync-only plugins on the calling thread (may be main thread)
 		for (IModPlugin plugin : syncPlugins) {
 			ResourceLocation pluginLocation = plugin.getPluginUid();
-			try {
-				if (plugin instanceof VanillaPlugin) {
-					LOGGER.info("Calling VanillaPlugin...");
+			Consumer<Runnable> pluginRunner = mainThreadRunnerResolver != null ? mainThreadRunnerResolver.apply(plugin) : null;
+			if (pluginRunner != null) {
+				if (blocking) {
+					CompletableFuture<Void> syncFuture = new CompletableFuture<>();
+					pluginRunner.accept(() -> {
+						try {
+							func.accept(plugin);
+							syncFuture.complete(null);
+						} catch (Throwable e) {
+							LOGGER.error("Plugin failed: {}", pluginLocation, e);
+							syncFuture.completeExceptionally(e);
+						}
+					});
+					try {
+						syncFuture.get();
+					} catch (InterruptedException e) {
+						Thread.currentThread().interrupt();
+						LOGGER.error("Interrupted while dispatching plugin {} to main thread:", pluginLocation, e);
+					} catch (ExecutionException e) {
+						LOGGER.error("Plugin {} failed on main thread:", pluginLocation, e.getCause());
+						if (store != null) {
+							store.markIncompatible(plugin, title);
+						}
+					}
+				} else {
+					pluginRunner.accept(() -> {
+						try {
+							func.accept(plugin);
+						} catch (Throwable e) {
+							LOGGER.error("Plugin failed: {}", pluginLocation, e);
+							if (store != null) {
+								store.markIncompatible(plugin, title);
+							}
+						}
+					});
 				}
-				func.accept(plugin);
-			} catch (Throwable e) {
-				LOGGER.error("Plugin failed: {}", pluginLocation, e);
+			} else {
+				try {
+					func.accept(plugin);
+				} catch (Throwable e) {
+					LOGGER.error("Plugin failed: {}", pluginLocation, e);
+					if (store != null) {
+						store.markIncompatible(plugin, title);
+					}
+				}
 			}
 		}
 
-		// 3. Fire-and-forget async futures: do NOT block the calling thread
-		if (!futures.isEmpty()) {
-			pendingRuntimeFuture = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
-					.thenRun(() -> {
-						pendingRuntimeFuture = null;
-						stopwatch.stop();
-						LOGGER.info("{} completed (async portion)", title);
-					});
+		if (blocking) {
+			try {
+				CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+			} catch (java.util.concurrent.CompletionException e) {
+				LOGGER.warn("One or more async plugins failed during {} (already handled)", title);
+			}
+			stopwatch.stop();
+			LOGGER.info("{} took {}", title, stopwatch);
+		} else {
+			if (!futures.isEmpty()) {
+				pendingRuntimeFuture = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+						.thenRun(() -> {
+							pendingRuntimeFuture = null;
+							stopwatch.stop();
+							LOGGER.info("{} completed (async portion)", title);
+						});
+			}
+			stopwatch.stop();
+			LOGGER.info("{} dispatched (sync done, async in background)", title);
 		}
-
-		stopwatch.stop();
-		LOGGER.info("{} dispatched (sync done, async in background)", title);
 	}
 
-	/**
-	 * Waits for any pending async plugin callbacks (onRuntimeAvailable) to complete.
-	 * Must be called before onRuntimeUnavailable to ensure proper ordering.
-	 */
 	public static void waitForPendingRuntimeFuture() {
 		CompletableFuture<Void> future = pendingRuntimeFuture;
 		if (future != null && !future.isDone()) {
 			try {
-				future.get(30, TimeUnit.SECONDS);
+				future.get();
 			} catch (InterruptedException e) {
 				Thread.currentThread().interrupt();
 			} catch (ExecutionException e) {
 				LOGGER.error("Pending runtime callbacks failed", e.getCause());
-			} catch (TimeoutException e) {
-				LOGGER.error("Pending runtime callbacks timed out");
 			}
 		}
 	}
@@ -277,9 +231,12 @@ public class PluginCaller {
 			String title,
 			List<IModPlugin> plugins,
 			Consumer<IModPlugin> func,
-			IncompatiblePluginStore incompatiblePluginStore
+			IncompatiblePluginStore incompatiblePluginStore,
+			@Nullable Consumer<Runnable> mainThreadRunner
 	) {
-		callOnPluginsWithFallback(title, plugins, func, incompatiblePluginStore, null);
+		callOnPluginsWithFallback(title, plugins, func, incompatiblePluginStore,
+			mainThreadRunner != null ? p -> mainThreadRunner : p -> null
+		);
 	}
 
 	public static void callOnPluginsWithFallback(
@@ -287,7 +244,7 @@ public class PluginCaller {
 			List<IModPlugin> plugins,
 			Consumer<IModPlugin> func,
 			IncompatiblePluginStore incompatiblePluginStore,
-			@Nullable Consumer<Runnable> mainThreadRunner
+			@Nullable Function<IModPlugin, Consumer<Runnable>> mainThreadRunnerResolver
 	) {
 		LOGGER.info("{} (with async fallback)...", title);
 		Stopwatch stopwatch = Stopwatch.createStarted();
@@ -302,20 +259,58 @@ public class PluginCaller {
 				.toList();
 
 		// Execute compatible plugins (with main-thread dispatch for sync plugins)
-		callOnPlugins(title, compatiblePlugins, func, mainThreadRunner);
+		callOnPlugins(title, compatiblePlugins, func, mainThreadRunnerResolver, incompatiblePluginStore);
 
-		// Execute incompatible plugins (also dispatch to main thread if runner provided)
+		// Re-execute compatible plugins that were marked incompatible during async execution.
+		// These plugins failed during the async batch and need to be re-run synchronously
+		// as a fallback so they still get a chance to register their content.
+		List<IModPlugin> newlyIncompatible = compatiblePlugins.stream()
+				.filter(p -> incompatiblePluginStore.isIncompatible(p, title))
+				.toList();
+		if (!newlyIncompatible.isEmpty()) {
+			LOGGER.warn("Re-executing {} failed plugins synchronously for {}...", newlyIncompatible.size(), title);
+			for (IModPlugin plugin : newlyIncompatible) {
+				ResourceLocation pluginLocation = plugin.getPluginUid();
+				Consumer<Runnable> pluginRunner = mainThreadRunnerResolver != null ? mainThreadRunnerResolver.apply(plugin) : null;
+				if (pluginRunner != null) {
+					CompletableFuture<Void> fallbackFuture = new CompletableFuture<>();
+					pluginRunner.accept(() -> {
+						try {
+							func.accept(plugin);
+						} catch (Throwable e) {
+							LOGGER.warn("Plugin {} failed again during synchronous fallback for {}:", pluginLocation, title, e);
+						} finally {
+							fallbackFuture.complete(null);
+						}
+					});
+					try {
+						fallbackFuture.get();
+					} catch (InterruptedException e) {
+						Thread.currentThread().interrupt();
+						LOGGER.error("Interrupted during fallback for plugin {}:", pluginLocation, e);
+					} catch (ExecutionException e) {
+						LOGGER.warn("Plugin {} failed again on main thread during fallback for {}:", pluginLocation, title, e.getCause());
+					}
+				} else {
+					try {
+						func.accept(plugin);
+					} catch (Throwable e) {
+						LOGGER.warn("Plugin {} failed again during synchronous fallback for {}:", pluginLocation, title, e);
+					}
+				}
+			}
+		}
+
+		// Execute incompatible plugins (resolve runner per-plugin)
 		if (!incompatiblePlugins.isEmpty()) {
 			LOGGER.info("Executing {} incompatible plugins synchronously for {}...", incompatiblePlugins.size(), title);
 			for (IModPlugin plugin : incompatiblePlugins) {
 				ResourceLocation pluginLocation = plugin.getPluginUid();
-				if (mainThreadRunner != null) {
+				Consumer<Runnable> pluginRunner = mainThreadRunnerResolver != null ? mainThreadRunnerResolver.apply(plugin) : null;
+				if (pluginRunner != null) {
 					CompletableFuture<Void> syncFuture = new CompletableFuture<>();
-					mainThreadRunner.accept(() -> {
+					pluginRunner.accept(() -> {
 						try {
-							if (plugin instanceof VanillaPlugin) {
-								LOGGER.info("Calling VanillaPlugin...");
-							}
 							func.accept(plugin);
 						} catch (Throwable e) {
 							LOGGER.error("Plugin failed: {}", pluginLocation, e);
@@ -333,9 +328,6 @@ public class PluginCaller {
 					}
 				} else {
 					try {
-						if (plugin instanceof VanillaPlugin) {
-							LOGGER.info("Calling VanillaPlugin...");
-						}
 						func.accept(plugin);
 					} catch (Throwable e) {
 						LOGGER.error("Plugin failed: {}", pluginLocation, e);

@@ -71,7 +71,7 @@ public final class JeiStarter {
 		}
 		return loadingExecutor;
 	}
-	private static final String EXPECTED_VERSION = "15.20.0.130-async-27"; // Current JEI-Async version
+	private static final String EXPECTED_VERSION = "15.20.0.130-async-28"; // Current JEI-Async version
 
 	private final StartData data;
 	private final List<IModPlugin> plugins;
@@ -142,7 +142,17 @@ public final class JeiStarter {
 		this.recipeCategorySortingConfig = new RecipeCategorySortingConfig(configDir.resolve("recipe-category-sort-order.ini"));
 		this.incompatiblePluginStore = new IncompatiblePluginStore(configDir);
 
-		PluginCaller.callPlugins("Sending ConfigManager", plugins, p -> p.onConfigManagerAvailable(configManager), DebugConfig.isAsyncLoadingEnabled(), incompatiblePluginStore);
+		// Run onConfigManagerAvailable synchronously — it's a lightweight config handoff.
+		// Using async here with allOf().join() would block the main/render thread, causing
+		// visible freezes during startup. Async compatibility detection is deferred to the
+		// actual loading phases (registerIngredients, registerCategories, etc.).
+		for (IModPlugin plugin : plugins) {
+			try {
+				plugin.onConfigManagerAvailable(configManager);
+			} catch (Throwable e) {
+				LOGGER.error("Plugin failed during onConfigManagerAvailable: {}", plugin.getPluginUid(), e);
+			}
+		}
 	}
 
 	public void start() {
@@ -210,7 +220,7 @@ public final class JeiStarter {
 		LoggedTimer totalTime = new LoggedTimer();
 		totalTime.start("Starting JEI");
 
-		JeiRuntime jeiRuntime = buildRuntime(false);
+		JeiRuntime jeiRuntime = buildRuntime(false, r -> Minecraft.getInstance().execute(r));
 
 		PluginCaller.callPlugins("Sending Runtime", plugins, p -> p.onRuntimeAvailable(jeiRuntime), false, incompatiblePluginStore);
 		Internal.setRuntime(jeiRuntime);
@@ -227,7 +237,7 @@ public final class JeiStarter {
 		// Provide a main-thread executor so sync-only plugins (those not implementing
 		// IAsyncCompatiblePlugin) can have their registration methods dispatched to the
 		// main thread, ensuring they can safely access Minecraft client state.
-		JeiRuntime jeiRuntime = buildRuntime(true, r -> Minecraft.getInstance().execute(r));
+		JeiRuntime jeiRuntime = buildRuntime(true, null);
 
 		if (cancelled) {
 			LOGGER.info("JEI background loading was cancelled");
@@ -246,8 +256,10 @@ public final class JeiStarter {
 			Internal.setLoadingProgress(null);
 			LOGGER.info("JEI has finished background loading and is now available.");
 			playLoadCompleteSound();
-			// Dispatch onRuntimeAvailable non-blocking to avoid blocking the main thread
-			PluginCaller.callOnPluginsNonBlocking("Sending Runtime", plugins, p -> p.onRuntimeAvailable(jeiRuntime));
+			// Dispatch onRuntimeAvailable non-blocking to avoid blocking the main thread.
+			// Sync-only plugins get dispatched via execute() so they run in a future tick,
+			// keeping the current frame responsive.
+			PluginCaller.callOnPluginsNonBlocking("Sending Runtime", plugins, p -> p.onRuntimeAvailable(jeiRuntime), incompatiblePluginStore, p -> null);
 		});
 	}
 
@@ -272,7 +284,7 @@ public final class JeiStarter {
 		}
 		IColorHelper colorHelper = new ColorHelper(colorNameConfig);
 		IIngredientFilterConfig ingredientFilterConfig = jeiClientConfigs.getIngredientFilterConfig();
-		SubtypeManager subtypeManager = PluginLoader.registerSubtypes(data, useAsyncFallback, incompatiblePluginStore);
+		SubtypeManager subtypeManager = PluginLoader.registerSubtypes(data, useAsyncFallback, incompatiblePluginStore, Minecraft.getInstance()::execute);
 
 		if (cancelled) {
 			throw new CancelledException();
@@ -282,7 +294,7 @@ public final class JeiStarter {
 		if (!hidden) {
 			Internal.setLoadingProgress("Loading ingredients...");
 		}
-		IIngredientManager ingredientManager = PluginLoader.registerIngredients(data, subtypeManager, colorHelper, ingredientFilterConfig, useAsyncFallback, incompatiblePluginStore);
+		IIngredientManager ingredientManager = PluginLoader.registerIngredients(data, subtypeManager, colorHelper, ingredientFilterConfig, useAsyncFallback, incompatiblePluginStore, mainThreadRunner);
 
 		if (cancelled) {
 			throw new CancelledException();
@@ -327,12 +339,14 @@ public final class JeiStarter {
 		IRecipeTransferManager recipeTransferManager = PluginLoader.createRecipeTransferManager(
 				plugins,
 				delegatingJeiHelpers,
-				data.serverConnection()
+				data.serverConnection(),
+				incompatiblePluginStore,
+				mainThreadRunner
 		);
 
 		LoggedTimer timer = new LoggedTimer();
 		timer.start("Building runtime");
-		IScreenHelper screenHelper = PluginLoader.createGuiScreenHelper(plugins, delegatingJeiHelpers, ingredientManager);
+		IScreenHelper screenHelper = PluginLoader.createGuiScreenHelper(plugins, delegatingJeiHelpers, ingredientManager, incompatiblePluginStore, mainThreadRunner);
 
 		RuntimeRegistration runtimeRegistration = new RuntimeRegistration(
 				recipeManager,
@@ -343,7 +357,7 @@ public final class JeiStarter {
 				screenHelper
 		);
 
-		PluginCaller.callPlugins("Registering Runtime", plugins, p -> p.registerRuntime(runtimeRegistration), useAsyncFallback, incompatiblePluginStore);
+		PluginCaller.callPlugins("Registering Runtime", plugins, p -> p.registerRuntime(runtimeRegistration), useAsyncFallback, incompatiblePluginStore, mainThreadRunner);
 
 		JeiRuntime jeiRuntime = new JeiRuntime(
 				recipeManager,

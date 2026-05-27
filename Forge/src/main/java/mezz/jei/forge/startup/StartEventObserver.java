@@ -20,13 +20,13 @@ import java.util.Set;
 
 /**
  * This class observes events and determines when it's the right time to start JEI.
- *
+ * <p>
  * JEI needs to see both the {@link TagsUpdatedEvent} and {@link RecipesUpdatedEvent}
  * before it is ready to start.
- *
+ * <p>
  * Depending on the configuration (Integrated server, vanilla server, modded server),
  * these events might come in any order.
- *
+ * <p>
  * Additionally, JEI waits for the world to finish loading before completing initialization.
  * This ensures that the world is fully loaded before JEI finishes, preventing issues with
  * world-dependent operations during JEI startup.
@@ -55,11 +55,9 @@ public class StartEventObserver {
 			.forEach(eventClass -> subscriptions.register(eventClass, this::onEvent));
 
 		subscriptions.register(ClientPlayerNetworkEvent.LoggingIn.class, event -> {
-			if (event.getPlayer() != null) {
-				LOGGER.info("JEI StartEventObserver received {}", event.getClass());
-				if (this.state == State.DISABLED) {
-					transitionState(State.ENABLED);
-				}
+			LOGGER.info("JEI StartEventObserver received {}", event.getClass());
+			if (this.state == State.DISABLED) {
+				transitionState(State.ENABLED);
 			}
 		});
 
@@ -83,9 +81,7 @@ public class StartEventObserver {
 			}
 		});
 
-		subscriptions.register(ScreenEvent.Render.Post.class, event -> {
-			LoadingOverlayRenderer.renderLoadingOverlay(event.getScreen(), event.getGuiGraphics());
-		});
+		subscriptions.register(ScreenEvent.Render.Post.class, event -> LoadingOverlayRenderer.renderLoadingOverlay(event.getScreen(), event.getGuiGraphics()));
 
 		subscriptions.register(ScreenEvent.RenderInventoryMobEffects.class, event -> {
 			if (Internal.isLoading()) {
@@ -97,7 +93,7 @@ public class StartEventObserver {
 			if (this.state != State.JEI_STARTED) {
 				Screen screen = event.getScreen();
 				Minecraft minecraft = screen.getMinecraft();
-				if (screen instanceof AbstractContainerScreen && minecraft != null && minecraft.player != null) {
+				if (screen instanceof AbstractContainerScreen && minecraft.player != null) {
 					LOGGER.error("""
 							A Screen is opening but JEI hasn't started yet.
 							Normally, JEI is started after ClientPlayerNetworkEvent.LoggedInEvent, TagsUpdatedEvent, and RecipesUpdatedEvent.
@@ -179,6 +175,8 @@ public class StartEventObserver {
 				forceProjectEClassLoad();
 				// Force Mekanism ISecurityUtils to load on the main thread before JEI starts loading
 				forceMekanismClassLoad();
+				// Force JER Compatibility to load on the main thread before JEI starts loading
+				forceJERClassLoad();
 			}
 			case EVENTS_RECEIVED -> {
 				if (this.state != State.ENABLED) {
@@ -188,6 +186,8 @@ public class StartEventObserver {
 				forceProjectEClassLoad();
 				// Force Mekanism ISecurityUtils to load on the main thread before JEI starts loading
 				forceMekanismClassLoad();
+				// Force JER Compatibility to load on the main thread before JEI starts loading
+				forceJERClassLoad();
 			}
 			case JEI_STARTED -> {
 				if (this.state != State.ENABLED && this.state != State.EVENTS_RECEIVED) {
@@ -201,6 +201,8 @@ public class StartEventObserver {
 				forceProjectEClassLoad();
 				// Force Mekanism ISecurityUtils to load on the main thread before JEI starts loading
 				forceMekanismClassLoad();
+				// Force JER Compatibility to load on the main thread before JEI starts loading
+				forceJERClassLoad();
 				// Start JEI in background - this is non-blocking now
 				this.startRunnable.run();
 				LOGGER.info("JEI startup initiated in background. The world is running.");
@@ -214,7 +216,7 @@ public class StartEventObserver {
 	private void forceMekanismClassLoad() {
 		try {
 			Class<?> mekaProxyClass = Class.forName("mekanism.api.security.ISecurityUtils");
-			mekaProxyClass.getField("INSTANCE").get(null);
+			mekaProxyClass.getField("INSTANCE");
 			LOGGER.info("Mekanism ISecurityUtils loaded successfully");
 		} catch (ClassNotFoundException e) {
 			LOGGER.info("Mekanism ISecurityUtils not found (ProjectE may not be installed)");
@@ -226,12 +228,29 @@ public class StartEventObserver {
 	private void forceProjectEClassLoad() {
 		try {
 			Class<?> emcProxyClass = Class.forName("moze_intel.projecte.api.proxy.IEMCProxy");
-			emcProxyClass.getField("INSTANCE").get(null);
+			emcProxyClass.getField("INSTANCE");
 			LOGGER.info("ProjectE IEMCProxy loaded successfully");
 		} catch (ClassNotFoundException e) {
 			LOGGER.info("ProjectE IEMCProxy not found (ProjectE may not be installed)");
 		} catch (Throwable e) {
 			LOGGER.info("ProjectE IEMCProxy load error: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+		}
+	}
+
+	private void forceJERClassLoad() {
+		try {
+			Class.forName("jeresources.compatibility.Compatibility");
+			Class.forName("jeresources.compatibility.minecraft.MinecraftCompat");
+			Class.forName("jeresources.util.LootTableHelper");
+			Class.forName("jeresources.config.Settings");
+			Class.forName("jeresources.proxy.CommonProxy");
+			Class.forName("jeresources.platform.Services");
+			Class.forName("jeresources.reference.Reference");
+			LOGGER.info("JustEnoughResources classes loaded successfully");
+		} catch (ClassNotFoundException e) {
+			LOGGER.info("JustEnoughResources not found (JER may not be installed)");
+		} catch (Throwable e) {
+			LOGGER.info("JustEnoughResources load error: " + e.getClass().getSimpleName() + ": " + e.getMessage());
 		}
 	}
 }
