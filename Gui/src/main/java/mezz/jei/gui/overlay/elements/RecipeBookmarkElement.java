@@ -75,7 +75,11 @@ public class RecipeBookmarkElement<R, I> implements IElement<I> {
 	}
 
 	@Override
+	@Nullable
 	public IDrawable createRenderOverlay() {
+		if (Internal.getOptionalJeiRuntime().isEmpty()) {
+			return null;
+		}
 		IRecipeCategory<R> recipeCategory = recipeBookmark.getRecipeCategory();
 		return new RecipeBookmarkIcon(recipeCategory);
 	}

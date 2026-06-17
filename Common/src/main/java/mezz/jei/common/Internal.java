@@ -31,7 +31,7 @@ public final class Internal {
 	@Nullable
 	private static IJeiClientConfigs jeiClientConfigs;
 	@Nullable
-	private static IJeiRuntime jeiRuntime;
+	private static volatile IJeiRuntime jeiRuntime;
 	private static final JeiFeatures jeiFeatures = new JeiFeatures();
 	private static final AtomicReference<String> loadingProgress = new AtomicReference<>(null);
 
