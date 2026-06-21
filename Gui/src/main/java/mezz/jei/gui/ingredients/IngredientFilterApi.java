@@ -7,7 +7,7 @@ import mezz.jei.common.util.ErrorUtil;
 
 import java.util.List;
 
-public class IngredientFilterApi implements IIngredientFilter {
+public class IngredientFilterApi implements IIngredientFilter, AutoCloseable {
 	private final IngredientFilter ingredientFilter;
 	private final IFilterTextSource filterTextSource;
 
@@ -30,5 +30,10 @@ public class IngredientFilterApi implements IIngredientFilter {
 	@Override
 	public <T> List<T> getFilteredIngredients(IIngredientType<T> ingredientType) {
 		return ingredientFilter.getFilteredIngredients(ingredientType);
+	}
+
+	@Override
+	public void close() {
+		ingredientFilter.close();
 	}
 }

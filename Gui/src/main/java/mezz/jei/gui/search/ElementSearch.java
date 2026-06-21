@@ -12,10 +12,12 @@ import mezz.jei.core.search.PrefixedSearchable;
 import mezz.jei.core.search.SearchMode;
 import mezz.jei.gui.ingredients.IListElement;
 import mezz.jei.gui.ingredients.IListElementInfo;
+import net.minecraft.client.Minecraft;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -30,6 +32,10 @@ public class ElementSearch implements IElementSearch {
 	private final Map<PrefixInfo<IListElementInfo<?>, IListElement<?>>, PrefixedSearchable<IListElementInfo<?>, IListElement<?>>> prefixedSearchables = new IdentityHashMap<>();
 	private final CombinedSearchables<IListElement<?>> combinedSearchables = new CombinedSearchables<>();
 	private final Map<Object, IListElement<?>> allElements = new HashMap<>();
+	private final Object deferredLock = new Object();
+	private final List<IListElementInfo<?>> deferredInfos = new ArrayList<>();
+	private @Nullable PrefixedSearchable<IListElementInfo<?>, IListElement<?>> tagSearchable;
+	private @Nullable PrefixedSearchable<IListElementInfo<?>, IListElement<?>> tooltipSearchable;
 
 	public ElementSearch(ElementPrefixParser elementPrefixParser) {
 		for (PrefixInfo<IListElementInfo<?>, IListElement<?>> prefixInfo : elementPrefixParser.allPrefixInfos()) {
@@ -38,6 +44,16 @@ public class ElementSearch implements IElementSearch {
 			this.prefixedSearchables.put(prefixInfo, prefixedSearchable);
 			this.combinedSearchables.addSearchable(prefixedSearchable);
 		}
+		this.tagSearchable = this.prefixedSearchables.entrySet().stream()
+			.filter(e -> e.getKey().getPrefix() == '#')
+			.findFirst()
+			.map(Map.Entry::getValue)
+			.orElse(null);
+		this.tooltipSearchable = this.prefixedSearchables.entrySet().stream()
+			.filter(e -> e.getKey().getPrefix() == '$')
+			.findFirst()
+			.map(Map.Entry::getValue)
+			.orElse(null);
 	}
 
 	@Override
@@ -92,6 +108,10 @@ public class ElementSearch implements IElementSearch {
 	}
 
 	public void addAll(Collection<IListElementInfo<?>> infos, IIngredientManager ingredientManager, @Nullable SearchStringCache cache) {
+		if (isBackgroundThread()) {
+			addAllBackground(infos, ingredientManager);
+			return;
+		}
 		// Build UID map for runtime identity
 		for (IListElementInfo<?> info : infos) {
 			IListElement<?> element = info.getElement();
@@ -157,6 +177,75 @@ public class ElementSearch implements IElementSearch {
 		}
 	}
 
+	private void addAllBackground(Collection<IListElementInfo<?>> infos, IIngredientManager ingredientManager) {
+		infos.parallelStream().forEach(info -> {
+			Object uid = getUid(info.getTypedIngredient(), ingredientManager);
+			this.allElements.put(uid, info.getElement());
+		});
+
+		for (Map.Entry<PrefixInfo<IListElementInfo<?>, IListElement<?>>, PrefixedSearchable<IListElementInfo<?>, IListElement<?>>> entry : this.prefixedSearchables.entrySet()) {
+			PrefixInfo<IListElementInfo<?>, IListElement<?>> prefixInfo = entry.getKey();
+			PrefixedSearchable<IListElementInfo<?>, IListElement<?>> prefixedSearchable = entry.getValue();
+			if (prefixedSearchable.getMode() == SearchMode.DISABLED) {
+				continue;
+			}
+			char prefix = prefixInfo.getPrefix();
+			if (prefix == '#' || prefix == '$') {
+				continue;
+			}
+			ISearchStorage<IListElement<?>> storage = prefixedSearchable.getSearchStorage();
+			for (IListElementInfo<?> info : infos) {
+				prefixedSearchable.getStrings(info).forEach(s -> storage.put(s, info.getElement()));
+			}
+		}
+
+		synchronized (this.deferredLock) {
+			this.deferredInfos.addAll(infos);
+		}
+	}
+
+	@Override
+	public void processDeferredTooltips() {
+		List<IListElementInfo<?>> infos;
+		synchronized (this.deferredLock) {
+			if (this.deferredInfos.isEmpty()) {
+				return;
+			}
+			infos = new ArrayList<>(this.deferredInfos);
+			this.deferredInfos.clear();
+		}
+
+		if (isBackgroundThread()) {
+			Minecraft mc = Minecraft.getInstance();
+			if (mc != null) {
+				mc.execute(this::processDeferredTooltips);
+			}
+			return;
+		}
+
+		if (this.tagSearchable != null && this.tagSearchable.getMode() != SearchMode.DISABLED) {
+			ISearchStorage<IListElement<?>> storage = this.tagSearchable.getSearchStorage();
+			for (IListElementInfo<?> info : infos) {
+				try {
+					this.tagSearchable.getStrings(info).forEach(s -> storage.put(s, info.getElement()));
+				} catch (Exception e) {
+					LOGGER.debug("Failed to process deferred tag search strings for ingredient", e);
+				}
+			}
+		}
+
+		if (this.tooltipSearchable != null && this.tooltipSearchable.getMode() != SearchMode.DISABLED) {
+			ISearchStorage<IListElement<?>> storage = this.tooltipSearchable.getSearchStorage();
+			for (IListElementInfo<?> info : infos) {
+				try {
+					this.tooltipSearchable.getStrings(info).forEach(s -> storage.put(s, info.getElement()));
+				} catch (Exception e) {
+					LOGGER.debug("Failed to process deferred tooltip search strings for ingredient", e);
+				}
+			}
+		}
+	}
+
 	@Override
 	public @Nullable <T> IListElement<T> findElement(ITypedIngredient<T> ingredient, IIngredientHelper<T> ingredientHelper) {
 		Object ingredientUid = ingredientHelper.getUid(ingredient.getIngredient(), UidContext.Ingredient);
@@ -175,6 +264,18 @@ public class ElementSearch implements IElementSearch {
 	}
 
 	@Override
+	public void clear() {
+		this.allElements.clear();
+		this.combinedSearchables.clear();
+		this.prefixedSearchables.clear();
+		synchronized (this.deferredLock) {
+			this.deferredInfos.clear();
+		}
+		this.tagSearchable = null;
+		this.tooltipSearchable = null;
+	}
+
+	@Override
 	public void logStatistics() {
 		this.prefixedSearchables.forEach((prefixInfo, value) -> {
 			if (prefixInfo.getMode() != SearchMode.DISABLED) {
@@ -182,5 +283,17 @@ public class ElementSearch implements IElementSearch {
 				LOGGER.info("ElementSearch {} Storage Stats: {}", prefixInfo, storage.statistics());
 			}
 		});
+	}
+
+	private static boolean isBackgroundThread() {
+		try {
+			Minecraft mc = Minecraft.getInstance();
+			if (mc == null) {
+				return false;
+			}
+			return !mc.isSameThread();
+		} catch (Exception e) {
+			return false;
+		}
 	}
 }

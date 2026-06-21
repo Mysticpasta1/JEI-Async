@@ -41,7 +41,8 @@ public class IngredientFilter implements
 	IIngredientGridSource,
 	IIngredientManager.IIngredientListener,
 	IIngredientVisibility.IListener,
-	IClientToggleState.IEditModeListener
+	IClientToggleState.IEditModeListener,
+	AutoCloseable
 {
 	private static final Logger LOGGER = LogManager.getLogger();
 	private static final Pattern QUOTE_PATTERN = Pattern.compile("\"");
@@ -60,6 +61,7 @@ public class IngredientFilter implements
 	@Nullable
 	private List<IElement<?>> ingredientListCached;
 	private final List<SourceListChangedListener> listeners = new ArrayList<>();
+	private volatile boolean closed = false;
 
 	public IngredientFilter(
 		IFilterTextSource filterTextSource,
@@ -98,16 +100,24 @@ public class IngredientFilter implements
 			this.elementSearch.logStatistics();
 		}
 
+		this.elementSearch.processDeferredTooltips();
+
 		this.filterTextSource.addListener(filterText -> {
 			invalidateCache();
 			notifyListenersOfChange();
 		});
 
-		clientToggleState.addEditModeToggleListener(this);
-
 		// Pre-build the sorted ingredient list cache on the current thread (background thread during async loading)
 		// to avoid a main-thread freeze when the user first opens their inventory.
 		getElements();
+	}
+
+	@Override
+	public void close() {
+		closed = true;
+		this.elementSearch.clear();
+		this.listeners.clear();
+		this.ingredientListCached = null;
 	}
 
 	private static IElementSearch createElementSearch(IClientConfig clientConfig, ElementPrefixParser elementPrefixParser) {

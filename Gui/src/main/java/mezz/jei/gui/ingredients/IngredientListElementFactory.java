@@ -4,6 +4,8 @@ import mezz.jei.api.helpers.IModIdHelper;
 import mezz.jei.api.ingredients.IIngredientType;
 import mezz.jei.api.ingredients.ITypedIngredient;
 import mezz.jei.api.runtime.IIngredientManager;
+import mezz.jei.core.util.RegistryLock;
+import mezz.jei.common.config.DebugConfig;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -12,6 +14,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 public final class IngredientListElementFactory {
 	private static final Logger LOGGER = LogManager.getLogger();
@@ -20,6 +23,17 @@ public final class IngredientListElementFactory {
 	}
 
 	public static List<IListElementInfo<?>> createBaseList(IIngredientManager ingredientManager, IModIdHelper modIdHelper) {
+		if (DebugConfig.isAsyncLoadingEnabled()) {
+			LOGGER.info("Building ingredient list in parallel...");
+			return ingredientManager.getRegisteredIngredientTypes().parallelStream()
+				.flatMap(ingredientType -> {
+					synchronized (RegistryLock.get()) {
+						return createBaseListForType(ingredientManager, ingredientType, modIdHelper).stream();
+					}
+				})
+				.collect(Collectors.toList());
+		}
+
 		List<IListElementInfo<?>> ingredientListElements = new ArrayList<>();
 
 		for (IIngredientType<?> ingredientType : ingredientManager.getRegisteredIngredientTypes()) {
@@ -62,4 +76,9 @@ public final class IngredientListElementFactory {
 		}
 	}
 
+	private static <V> List<IListElementInfo<?>> createBaseListForType(IIngredientManager ingredientManager, IIngredientType<V> ingredientType, IModIdHelper modIdHelper) {
+		List<IListElementInfo<?>> results = new ArrayList<>();
+		addToBaseList(results, ingredientManager, ingredientType, modIdHelper);
+		return results;
+	}
 }

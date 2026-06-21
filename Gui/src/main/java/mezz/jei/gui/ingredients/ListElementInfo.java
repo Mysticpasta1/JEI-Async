@@ -9,6 +9,7 @@ import mezz.jei.common.config.IIngredientFilterConfig;
 import mezz.jei.common.util.SafeIngredientUtil;
 import mezz.jei.common.util.StringUtil;
 import mezz.jei.common.util.Translator;
+import mezz.jei.core.util.RegistryLock;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.FormattedText;
 import net.minecraft.resources.ResourceLocation;
@@ -181,6 +182,7 @@ public class ListElementInfo<V> implements IListElementInfo<V> {
 			return List.of();
 		}
 		Set<String> creativeTabStrings = new HashSet<>();
+		synchronized (RegistryLock.get()) {
 		for (CreativeModeTab itemGroup : CreativeModeTabs.allTabs()) {
 			if (!itemGroup.shouldDisplay() || itemGroup.getType() != CreativeModeTab.Type.CATEGORY) {
 				continue;
@@ -191,6 +193,7 @@ public class ListElementInfo<V> implements IListElementInfo<V> {
 				name = Translator.toLowercaseWithLocale(name);
 				Collections.addAll(creativeTabStrings, name.split(" "));
 			}
+		}
 		}
 		return creativeTabStrings;
 	}

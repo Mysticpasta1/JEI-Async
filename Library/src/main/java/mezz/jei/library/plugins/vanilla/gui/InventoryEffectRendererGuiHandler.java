@@ -24,7 +24,7 @@ public final class InventoryEffectRendererGuiHandler<T extends AbstractContainer
 	@SuppressWarnings("JavadocReference")
 	@Override
 	public List<Rect2i> getGuiExtraAreas(EffectRenderingInventoryScreen<T> containerScreen) {
-		if (!Internal.getJeiFeatures().getInventoryEffectRendererGuiHandlerEnabled()) {
+		if (!Internal.getJeiFeatures().getInventoryEffectRendererGuiHandlerEnabled() || Internal.isLoading()) {
 			return List.of();
 		}
 		Minecraft minecraft = Minecraft.getInstance();

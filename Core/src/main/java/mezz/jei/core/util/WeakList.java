@@ -18,6 +18,10 @@ public class WeakList<T> {
 		list.add(new WeakReference<>(item));
 	}
 
+	public void clear() {
+		list = null;
+	}
+
 	public void forEach(Consumer<T> consumer) {
 		if (list == null) {
 			return;

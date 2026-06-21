@@ -53,7 +53,10 @@ public interface IIngredientAcceptor<THIS extends IIngredientAcceptor<THIS>> ext
 	 *
 	 * @since 9.3.0
 	 */
-	default THIS addIngredients(Ingredient ingredient) {
+	default THIS addIngredients(@Nullable Ingredient ingredient) {
+		if (ingredient == null) {
+			return addIngredients(VanillaTypes.ITEM_STACK, List.of());
+		}
 		return addIngredients(VanillaTypes.ITEM_STACK, List.of(ingredient.getItems()));
 	}
 

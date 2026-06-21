@@ -22,5 +22,9 @@ public interface IElementSearch {
 	@Nullable
 	<T> IListElement<T> findElement(ITypedIngredient<T> ingredient, IIngredientHelper<T> ingredientHelper);
 
+	void clear();
+
 	void logStatistics();
+
+	default void processDeferredTooltips() {}
 }

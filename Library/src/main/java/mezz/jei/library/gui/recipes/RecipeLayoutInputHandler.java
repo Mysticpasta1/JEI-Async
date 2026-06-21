@@ -10,10 +10,13 @@ import net.minecraft.client.gui.navigation.ScreenPosition;
 import net.minecraft.client.gui.navigation.ScreenRectangle;
 import net.minecraft.client.renderer.Rect2i;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import java.util.ArrayList;
 import java.util.List;
 
 public class RecipeLayoutInputHandler<T> implements IJeiInputHandler {
+	private static final Logger LOGGER = LogManager.getLogger();
 	private final RecipeLayout<T> recipeLayout;
 	private final List<IJeiInputHandler> inputHandlers;
 	private final List<IJeiGuiEventListener> guiEventListeners;
@@ -43,25 +46,33 @@ public class RecipeLayoutInputHandler<T> implements IJeiInputHandler {
 		final double recipeMouseY = mouseY - area.getY();
 
 		for (IJeiInputHandler inputHandler : inputHandlers) {
-			ScreenRectangle widgetArea = inputHandler.getArea();
-			if (MathUtil.contains(widgetArea, recipeMouseX, recipeMouseY)) {
-				ScreenPosition position = widgetArea.position();
-				double relativeMouseX = recipeMouseX - position.x();
-				double relativeMouseY = recipeMouseY - position.y();
-				if (inputHandler.handleInput(relativeMouseX, relativeMouseY, userInput)) {
-					return true;
+			try {
+				ScreenRectangle widgetArea = inputHandler.getArea();
+				if (MathUtil.contains(widgetArea, recipeMouseX, recipeMouseY)) {
+					ScreenPosition position = widgetArea.position();
+					double relativeMouseX = recipeMouseX - position.x();
+					double relativeMouseY = recipeMouseY - position.y();
+					if (inputHandler.handleInput(relativeMouseX, relativeMouseY, userInput)) {
+						return true;
+					}
 				}
+			} catch (Throwable e) {
+				LOGGER.error("Recipe input handler caught exception (not removing)", e);
 			}
 		}
 		for (IJeiGuiEventListener guiEventListener : guiEventListeners) {
-			ScreenRectangle widgetArea = guiEventListener.getArea();
-			if (MathUtil.contains(widgetArea, recipeMouseX, recipeMouseY)) {
-				ScreenPosition position = widgetArea.position();
-				double relativeMouseX = recipeMouseX - position.x();
-				double relativeMouseY = recipeMouseY - position.y();
-				if (handleInput(guiEventListener, relativeMouseX, relativeMouseY, userInput)) {
-					return true;
+			try {
+				ScreenRectangle widgetArea = guiEventListener.getArea();
+				if (MathUtil.contains(widgetArea, recipeMouseX, recipeMouseY)) {
+					ScreenPosition position = widgetArea.position();
+					double relativeMouseX = recipeMouseX - position.x();
+					double relativeMouseY = recipeMouseY - position.y();
+					if (handleInput(guiEventListener, relativeMouseX, relativeMouseY, userInput)) {
+						return true;
+					}
 				}
+			} catch (Throwable e) {
+				LOGGER.error("Recipe gui event listener caught exception (not removing)", e);
 			}
 		}
 
@@ -70,9 +81,14 @@ public class RecipeLayoutInputHandler<T> implements IJeiInputHandler {
 		}
 		IRecipeCategory<T> recipeCategory = recipeLayout.getRecipeCategory();
 		T recipe = recipeLayout.getRecipe();
-		@SuppressWarnings("removal")
-		boolean legacyResult = recipeCategory.handleInput(recipe, recipeMouseX, recipeMouseY, userInput.getKey());
-		return legacyResult;
+		try {
+			@SuppressWarnings("removal")
+			boolean legacyResult = recipeCategory.handleInput(recipe, recipeMouseX, recipeMouseY, userInput.getKey());
+			return legacyResult;
+		} catch (Throwable e) {
+			LOGGER.error("Recipe category handleInput failed", e);
+			return false;
+		}
 	}
 
 	private static boolean handleInput(IJeiGuiEventListener guiEventListener, double relativeMouseX, double relativeMouseY, IJeiUserInput userInput) {
@@ -108,25 +124,33 @@ public class RecipeLayoutInputHandler<T> implements IJeiInputHandler {
 		final double recipeMouseY = mouseY - area.getY();
 
 		for (IJeiInputHandler inputHandler : inputHandlers) {
-			ScreenRectangle widgetArea = inputHandler.getArea();
-			if (MathUtil.contains(widgetArea, recipeMouseX, recipeMouseY)) {
-				ScreenPosition position = widgetArea.position();
-				double relativeMouseX = recipeMouseX - position.x();
-				double relativeMouseY = recipeMouseY - position.y();
-				if (inputHandler.handleMouseDragged(relativeMouseX, relativeMouseY, mouseKey, dragX, dragY)) {
-					return true;
+			try {
+				ScreenRectangle widgetArea = inputHandler.getArea();
+				if (MathUtil.contains(widgetArea, recipeMouseX, recipeMouseY)) {
+					ScreenPosition position = widgetArea.position();
+					double relativeMouseX = recipeMouseX - position.x();
+					double relativeMouseY = recipeMouseY - position.y();
+					if (inputHandler.handleMouseDragged(relativeMouseX, relativeMouseY, mouseKey, dragX, dragY)) {
+						return true;
+					}
 				}
+			} catch (Throwable e) {
+				LOGGER.error("Recipe input handler mouseDragged caught exception (not removing)", e);
 			}
 		}
 		for (IJeiGuiEventListener guiEventListener : guiEventListeners) {
-			ScreenRectangle widgetArea = guiEventListener.getArea();
-			if (MathUtil.contains(widgetArea, recipeMouseX, recipeMouseY)) {
-				ScreenPosition position = widgetArea.position();
-				double relativeMouseX = recipeMouseX - position.x();
-				double relativeMouseY = recipeMouseY - position.y();
-				if (guiEventListener.mouseDragged(relativeMouseX, relativeMouseY, mouseKey.getValue(), dragX, dragY)) {
-					return true;
+			try {
+				ScreenRectangle widgetArea = guiEventListener.getArea();
+				if (MathUtil.contains(widgetArea, recipeMouseX, recipeMouseY)) {
+					ScreenPosition position = widgetArea.position();
+					double relativeMouseX = recipeMouseX - position.x();
+					double relativeMouseY = recipeMouseY - position.y();
+					if (guiEventListener.mouseDragged(relativeMouseX, relativeMouseY, mouseKey.getValue(), dragX, dragY)) {
+						return true;
+					}
 				}
+			} catch (Throwable e) {
+				LOGGER.error("Recipe gui event listener mouseDragged caught exception (not removing)", e);
 			}
 		}
 		return false;
@@ -143,25 +167,33 @@ public class RecipeLayoutInputHandler<T> implements IJeiInputHandler {
 		final double recipeMouseY = mouseY - area.getY();
 
 		for (IJeiInputHandler inputHandler : inputHandlers) {
-			ScreenRectangle widgetArea = inputHandler.getArea();
-			if (MathUtil.contains(widgetArea, recipeMouseX, recipeMouseY)) {
-				ScreenPosition position = widgetArea.position();
-				double relativeMouseX = recipeMouseX - position.x();
-				double relativeMouseY = recipeMouseY - position.y();
-				if (inputHandler.handleMouseScrolled(relativeMouseX, relativeMouseY, scrollDeltaX, scrollDeltaY)) {
-					return true;
+			try {
+				ScreenRectangle widgetArea = inputHandler.getArea();
+				if (MathUtil.contains(widgetArea, recipeMouseX, recipeMouseY)) {
+					ScreenPosition position = widgetArea.position();
+					double relativeMouseX = recipeMouseX - position.x();
+					double relativeMouseY = recipeMouseY - position.y();
+					if (inputHandler.handleMouseScrolled(relativeMouseX, relativeMouseY, scrollDeltaX, scrollDeltaY)) {
+						return true;
+					}
 				}
+			} catch (Throwable e) {
+				LOGGER.error("Recipe input handler mouseScrolled caught exception (not removing)", e);
 			}
 		}
 		for (IJeiGuiEventListener guiEventListener : guiEventListeners) {
-			ScreenRectangle widgetArea = guiEventListener.getArea();
-			if (MathUtil.contains(widgetArea, recipeMouseX, recipeMouseY)) {
-				ScreenPosition position = widgetArea.position();
-				double relativeMouseX = recipeMouseX - position.x();
-				double relativeMouseY = recipeMouseY - position.y();
-				if (guiEventListener.mouseScrolled(relativeMouseX, relativeMouseY, scrollDeltaX, scrollDeltaY)) {
-					return true;
+			try {
+				ScreenRectangle widgetArea = guiEventListener.getArea();
+				if (MathUtil.contains(widgetArea, recipeMouseX, recipeMouseY)) {
+					ScreenPosition position = widgetArea.position();
+					double relativeMouseX = recipeMouseX - position.x();
+					double relativeMouseY = recipeMouseY - position.y();
+					if (guiEventListener.mouseScrolled(relativeMouseX, relativeMouseY, scrollDeltaX, scrollDeltaY)) {
+						return true;
+					}
 				}
+			} catch (Throwable e) {
+				LOGGER.error("Recipe gui event listener mouseScrolled caught exception (not removing)", e);
 			}
 		}
 		return false;
@@ -178,21 +210,29 @@ public class RecipeLayoutInputHandler<T> implements IJeiInputHandler {
 		final double recipeMouseY = mouseY - area.getY();
 
 		for (IJeiInputHandler inputHandler : inputHandlers) {
-			ScreenRectangle widgetArea = inputHandler.getArea();
-			if (MathUtil.contains(widgetArea, recipeMouseX, recipeMouseY)) {
-				ScreenPosition position = widgetArea.position();
-				double relativeMouseX = recipeMouseX - position.x();
-				double relativeMouseY = recipeMouseY - position.y();
-				inputHandler.handleMouseMoved(relativeMouseX, relativeMouseY);
+			try {
+				ScreenRectangle widgetArea = inputHandler.getArea();
+				if (MathUtil.contains(widgetArea, recipeMouseX, recipeMouseY)) {
+					ScreenPosition position = widgetArea.position();
+					double relativeMouseX = recipeMouseX - position.x();
+					double relativeMouseY = recipeMouseY - position.y();
+					inputHandler.handleMouseMoved(relativeMouseX, relativeMouseY);
+				}
+			} catch (Throwable e) {
+				LOGGER.error("Recipe input handler handleMouseMoved caught exception (not removing)", e);
 			}
 		}
 		for (IJeiGuiEventListener guiEventListener : guiEventListeners) {
-			ScreenRectangle widgetArea = guiEventListener.getArea();
-			if (MathUtil.contains(widgetArea, recipeMouseX, recipeMouseY)) {
-				ScreenPosition position = widgetArea.position();
-				double relativeMouseX = recipeMouseX - position.x();
-				double relativeMouseY = recipeMouseY - position.y();
-				guiEventListener.mouseMoved(relativeMouseX, relativeMouseY);
+			try {
+				ScreenRectangle widgetArea = guiEventListener.getArea();
+				if (MathUtil.contains(widgetArea, recipeMouseX, recipeMouseY)) {
+					ScreenPosition position = widgetArea.position();
+					double relativeMouseX = recipeMouseX - position.x();
+					double relativeMouseY = recipeMouseY - position.y();
+					guiEventListener.mouseMoved(relativeMouseX, relativeMouseY);
+				}
+			} catch (Throwable e) {
+				LOGGER.error("Recipe gui event listener handleMouseMoved caught exception (not removing)", e);
 			}
 		}
 	}
@@ -203,5 +243,9 @@ public class RecipeLayoutInputHandler<T> implements IJeiInputHandler {
 
 	public void addGuiEventListener(IJeiGuiEventListener guiEventListener) {
 		this.guiEventListeners.add(guiEventListener);
+	}
+
+	List<IJeiGuiEventListener> getGuiEventListeners() {
+		return guiEventListeners;
 	}
 }

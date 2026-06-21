@@ -31,7 +31,7 @@ public final class Internal {
 	@Nullable
 	private static IJeiClientConfigs jeiClientConfigs;
 	@Nullable
-	private static IJeiRuntime jeiRuntime;
+	private static volatile IJeiRuntime jeiRuntime;
 	private static final JeiFeatures jeiFeatures = new JeiFeatures();
 	private static final AtomicReference<String> loadingProgress = new AtomicReference<>(null);
 
@@ -99,6 +99,10 @@ public final class Internal {
 		Preconditions.checkState(jeiRuntime != null, "Jei Client Configs have not been created yet.");
 
 		return jeiRuntime;
+	}
+
+	public static Optional<IJeiRuntime> getOptionalJeiRuntime() {
+		return Optional.ofNullable(jeiRuntime);
 	}
 
 	public static void setLoadingProgress(@Nullable String progress) {

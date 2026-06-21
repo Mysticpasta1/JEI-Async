@@ -38,6 +38,12 @@ public final class SafeIngredientUtil {
 	private SafeIngredientUtil() {
 	}
 
+	public static void clearCrashingCache() {
+		CRASHING_INGREDIENT_BATCH_RENDERERS.clear();
+		CRASHING_INGREDIENT_RENDERERS.clear();
+		CRASHING_INGREDIENT_TOOLTIPS.clear();
+	}
+
 	public static <T> void getRichTooltip(ITooltipBuilder tooltip, IIngredientManager ingredientManager, IIngredientRenderer<T> ingredientRenderer, ITypedIngredient<T> typedIngredient) {
 		Minecraft minecraft = Minecraft.getInstance();
 		TooltipFlag.Default tooltipFlag = minecraft.options.advancedItemTooltips ? TooltipFlag.Default.ADVANCED : TooltipFlag.Default.NORMAL;
@@ -90,6 +96,9 @@ public final class SafeIngredientUtil {
 
 		try {
 			return ingredientRenderer.getTooltip(ingredient, tooltipFlag);
+		} catch (IllegalStateException e) {
+			LOGGER.warn("Failed to get tooltip for ingredient (transient error, likely config not loaded yet): {}", e.getMessage());
+			return List.of();
 		} catch (RuntimeException | LinkageError e) {
 			CRASHING_INGREDIENT_TOOLTIPS.add(ingredient);
 			ErrorUtil.logIngredientCrash(e, "Caught an error getting an Ingredient's tooltip", ingredientManager, typedIngredient.getType(), ingredient);

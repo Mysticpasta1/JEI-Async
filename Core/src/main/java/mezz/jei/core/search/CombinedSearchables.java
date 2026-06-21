@@ -29,4 +29,8 @@ public class CombinedSearchables<T> implements ISearchable<T> {
 	public void addSearchable(ISearchable<T> searchable) {
 		this.searchables.add(searchable);
 	}
+
+	public void clear() {
+		this.searchables.clear();
+	}
 }
