@@ -71,7 +71,7 @@ public final class JeiStarter {
 		}
 		return loadingExecutor;
 	}
-	private static final String EXPECTED_VERSION = "15.20.0.130-async-29"; // Current JEI-Async version
+	private static final String EXPECTED_VERSION = "15.20.0.130-async-30"; // Current JEI-Async version
 
 	private final StartData data;
 	private final List<IModPlugin> plugins;

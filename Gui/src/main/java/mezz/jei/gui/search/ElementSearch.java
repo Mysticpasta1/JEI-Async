@@ -75,13 +75,19 @@ public class ElementSearch implements IElementSearch {
 		IListElement<T> element = info.getElement();
 		Object uid = getUid(element.getTypedIngredient(), ingredientManager);
 		this.allElements.put(uid, element);
+		boolean backgroundThread = isBackgroundThread();
 		for (Map.Entry<PrefixInfo<IListElementInfo<?>, IListElement<?>>, PrefixedSearchable<IListElementInfo<?>, IListElement<?>>> entry : this.prefixedSearchables.entrySet()) {
 			PrefixInfo<IListElementInfo<?>, IListElement<?>> prefixInfo = entry.getKey();
 			PrefixedSearchable<IListElementInfo<?>, IListElement<?>> prefixedSearchable = entry.getValue();
 			if (prefixedSearchable.getMode() == SearchMode.DISABLED) {
 				continue;
 			}
-			if (isBackgroundThread() && prefixInfo.getPrefix() == '#') {
+			if (backgroundThread && prefixInfo.getPrefix() == '#') {
+				// Tooltip generation must happen on the render thread; defer it so it is
+				// still indexed later instead of being dropped.
+				synchronized (this.tooltipLock) {
+					this.deferredTooltipInfos.add(info);
+				}
 				continue;
 			}
 			Collection<String> strings = prefixedSearchable.getStrings(info);
@@ -226,6 +232,19 @@ public class ElementSearch implements IElementSearch {
 
 	@Override
 	public void processDeferredTooltips() {
+		// Tooltip generation must run on the render thread. If we're still on the
+		// background loading thread, reschedule onto the main thread WITHOUT draining
+		// the deferred list first, otherwise the rescheduled call would find it empty
+		// and the tooltip search index (used to find e.g. enchanted books by enchantment)
+		// would never be built.
+		if (isBackgroundThread()) {
+			Minecraft mc = Minecraft.getInstance();
+			if (mc != null) {
+				mc.execute(this::processDeferredTooltips);
+			}
+			return;
+		}
+
 		List<IListElementInfo<?>> infos;
 		synchronized (this.tooltipLock) {
 			if (this.deferredTooltipInfos.isEmpty()) {
@@ -233,14 +252,6 @@ public class ElementSearch implements IElementSearch {
 			}
 			infos = new ArrayList<>(this.deferredTooltipInfos);
 			this.deferredTooltipInfos.clear();
-		}
-
-		if (isBackgroundThread()) {
-			Minecraft mc = Minecraft.getInstance();
-			if (mc != null) {
-				mc.execute(this::processDeferredTooltips);
-			}
-			return;
 		}
 
 		if (this.tooltipSearchable == null || this.tooltipSearchable.getMode() == SearchMode.DISABLED) {
