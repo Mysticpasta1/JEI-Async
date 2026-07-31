@@ -13,7 +13,6 @@ import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,8 +30,12 @@ public class RecipeCategoryRegistration implements IRecipeCategoryRegistration {
 		this.categoryListener = categoryListener;
 	}
 
+	// Categories arrive from several threads at once during one loading phase: async-compatible
+	// plugins run on the loader pool while sync-only plugins run as a batch on the main thread.
+	// Everything that touches these two collections is serialised on this lock so the duplicate
+	// check and the append stay atomic with respect to each other.
 	@Override
-	public void addRecipeCategories(IRecipeCategory<?>... recipeCategories) {
+	public synchronized void addRecipeCategories(IRecipeCategory<?>... recipeCategories) {
 		ErrorUtil.checkNotEmpty(recipeCategories, "recipeCategories");
 
 		List<IRecipeCategory<?>> added = new ArrayList<>();
@@ -53,7 +56,10 @@ public class RecipeCategoryRegistration implements IRecipeCategoryRegistration {
 
 		if (!added.isEmpty()) {
 			this.recipeCategories.addAll(added);
-			this.categoryListener.accept(Collections.unmodifiableCollection(this.recipeCategories));
+			// An immutable snapshot, not a view of the backing list. The listener hands this straight
+			// to IJeiHelpers, where plugins still running this phase on other threads iterate it via
+			// getRecipeType/getAllRecipeTypes; a live view would let them read it mid-append.
+			this.categoryListener.accept(List.copyOf(this.recipeCategories));
 		}
 	}
 
@@ -63,7 +69,7 @@ public class RecipeCategoryRegistration implements IRecipeCategoryRegistration {
 	}
 
 	@Unmodifiable
-	public List<IRecipeCategory<?>> getRecipeCategories() {
+	public synchronized List<IRecipeCategory<?>> getRecipeCategories() {
 		return List.copyOf(recipeCategories);
 	}
 }

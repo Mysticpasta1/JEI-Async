@@ -27,14 +27,6 @@ import java.util.function.Function;
 public class PluginCaller {
 	private static final Logger LOGGER = LogManager.getLogger();
 
-	/**
-	 * Upper bound on how long a background loading thread will wait for the main thread to
-	 * drain a batch of sync-only plugins. The main thread normally drains its task queue every
-	 * tick, so this is only ever hit when the client is stuck or shutting down; without a bound
-	 * the loader thread would hang forever and keep the whole runtime alive.
-	 */
-	private static final long MAIN_THREAD_TIMEOUT_SECONDS = 60;
-
 	@Nullable
 	private static volatile ExecutorService executor;
 	@Nullable
@@ -268,27 +260,51 @@ public class PluginCaller {
 			return;
 		}
 
-		CompletableFuture<Void> syncFuture = new CompletableFuture<>();
+		CompletableFuture<Void> finished = new CompletableFuture<>();
 		mainThreadRunner.accept(() -> {
 			try {
 				work.run();
 			} finally {
-				syncFuture.complete(null);
+				finished.complete(null);
 			}
 		});
-		awaitMainThread(syncFuture, title, batch.size());
+		awaitMainThread(title, batch.size(), finished);
 	}
 
-	private static void awaitMainThread(CompletableFuture<Void> future, String title, int pluginCount) {
+	/**
+	 * Waits for a batch that was handed to the main thread.
+	 * <p>
+	 * Deliberately unbounded. Neither how long the main thread takes to reach the queued batch nor
+	 * how long the plugins in it take is something the loader can put a meaningful number on, and
+	 * giving up early is worse than waiting: the batch stays queued and runs later regardless, so
+	 * the loader would carry on reading registration state that the main thread is still writing.
+	 * Loading is cancellable, which interrupts this thread, so this wait is never unrecoverable.
+	 */
+	private static void awaitMainThread(String title, int pluginCount, CompletableFuture<Void> finished) {
 		try {
-			future.get(MAIN_THREAD_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+			finished.get();
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
-			LOGGER.error("Interrupted while dispatching {} plugins to the main thread for {}", pluginCount, title);
+			throw new MainThreadDispatchException("Interrupted while running " + pluginCount + " plugins on the main thread for " + title, e);
 		} catch (ExecutionException e) {
-			LOGGER.error("Plugins failed on the main thread during {}:", title, e.getCause());
-		} catch (TimeoutException e) {
-			LOGGER.error("Timed out after {}s waiting for the main thread to run {} plugins for {}. Continuing without them.", MAIN_THREAD_TIMEOUT_SECONDS, pluginCount, title);
+			// work.run() swallows plugin failures itself, so this only fires if the dispatch broke.
+			throw new MainThreadDispatchException("Failed to run " + pluginCount + " plugins on the main thread for " + title, e.getCause());
+		}
+	}
+
+	/**
+	 * Thrown when a batch of sync-only plugins could not be run on the main thread.
+	 * <p>
+	 * Loading deliberately cannot continue past this. The queued batch is still sitting in the main
+	 * thread's task queue and may run at any moment, writing to the very registration objects the
+	 * loader would go on to read, so carrying on produces a half-built runtime that fails much later
+	 * and much further from the cause.
+	 */
+	public static class MainThreadDispatchException extends RuntimeException {
+		private static final long serialVersionUID = 1L;
+
+		public MainThreadDispatchException(String message, @Nullable Throwable cause) {
+			super(message, cause);
 		}
 	}
 

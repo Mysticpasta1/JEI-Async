@@ -183,10 +183,22 @@ public final class PluginLoader {
 		} else {
 			PluginCaller.callOnPlugins("Registering categories", plugins, p -> p.registerCategories(recipeCategoryRegistration), mainThreadRunnerResolver, incompatiblePluginStore);
 		}
+		if (vanillaPlugin.getCraftingCategory().isEmpty() || vanillaPlugin.getSmithingCategory().isEmpty()) {
+			// The vanilla categories are required to build the vanilla category extensions, so losing
+			// them takes the whole load down. VanillaPlugin assigns these fields before it hands the
+			// categories to the registration, so an empty Optional means it never got that far and
+			// re-running it cannot duplicate anything already registered.
+			LOGGER.warn("The vanilla JEI plugin did not register its categories, running it again directly.");
+			try {
+				vanillaPlugin.registerCategories(recipeCategoryRegistration);
+			} catch (Throwable e) {
+				throw new IllegalStateException("The vanilla JEI plugin failed to register its recipe categories", e);
+			}
+		}
 		CraftingRecipeCategory craftingCategory = vanillaPlugin.getCraftingCategory()
-			.orElseThrow(() -> new NullPointerException("vanilla crafting category"));
+			.orElseThrow(() -> new IllegalStateException("The vanilla JEI plugin did not register a crafting category"));
 		SmithingRecipeCategory smithingCategory = vanillaPlugin.getSmithingCategory()
-			.orElseThrow(() -> new NullPointerException("vanilla smithing category"));
+			.orElseThrow(() -> new IllegalStateException("The vanilla JEI plugin did not register a smithing category"));
 		VanillaCategoryExtensionRegistration vanillaCategoryExtensionRegistration = new VanillaCategoryExtensionRegistration(craftingCategory, smithingCategory, jeiHelpers);
 		if (useAsyncFallback && incompatiblePluginStore != null) {
 			PluginCaller.callOnPluginsWithFallback("Registering vanilla category extensions", plugins, p -> p.registerVanillaCategoryExtensions(vanillaCategoryExtensionRegistration), incompatiblePluginStore, mainThreadRunnerResolver);
