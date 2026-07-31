@@ -7,6 +7,7 @@ import mezz.jei.api.recipe.category.IRecipeCategory;
 import net.minecraft.resources.ResourceLocation;
 import org.jetbrains.annotations.Unmodifiable;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -62,6 +63,11 @@ public class RecipeTypeDataMap {
 		@SuppressWarnings("unchecked")
 		RecipeTypeData<T> castRecipeTypeData = (RecipeTypeData<T>) recipeTypeData;
 		return castRecipeTypeData;
+	}
+
+	@Unmodifiable
+	public Collection<RecipeTypeData<?>> values() {
+		return uidMap.values();
 	}
 
 	public void validate(RecipeType<?> recipeType) {

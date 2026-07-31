@@ -36,9 +36,13 @@ public class PluginManager {
 
 		if (!includeHidden) {
 			Set<T> hiddenRecipes = recipeTypeData.getHiddenRecipes();
-			Predicate<T> notHidden = ((Predicate<T>) hiddenRecipes::contains).negate();
+			// Nothing is hidden in the overwhelmingly common case, and this filter otherwise takes
+			// a monitor on the synchronized set once per recipe, per frame, while browsing.
+			if (!hiddenRecipes.isEmpty()) {
+				Predicate<T> notHidden = ((Predicate<T>) hiddenRecipes::contains).negate();
 
-			recipes = recipes.filter(notHidden);
+				recipes = recipes.filter(notHidden);
+			}
 		}
 		return recipes;
 	}

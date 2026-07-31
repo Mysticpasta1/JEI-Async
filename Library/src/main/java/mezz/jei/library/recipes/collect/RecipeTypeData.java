@@ -15,8 +15,14 @@ import java.util.Set;
 public class RecipeTypeData<T> {
 	private final IRecipeCategory<T> recipeCategory;
 	private final List<ITypedIngredient<?>> recipeCategoryCatalysts;
-	private final List<T> recipes = java.util.Collections.synchronizedList(new ArrayList<>());
+	private final ArrayList<T> backingRecipes = new ArrayList<>();
+	private final List<T> recipes = java.util.Collections.synchronizedList(backingRecipes);
 	private final Set<T> hiddenRecipes = java.util.Collections.synchronizedSet(Collections.newSetFromMap(new IdentityHashMap<>()));
+	/**
+	 * Cached unmodifiable view. {@link #getRecipes()} is called per frame while a recipe GUI is
+	 * open, and each call used to allocate a fresh wrapper.
+	 */
+	private final List<T> recipesView = Collections.unmodifiableList(recipes);
 
 	public RecipeTypeData(IRecipeCategory<T> recipeCategory, List<ITypedIngredient<?>> recipeCategoryCatalysts) {
 		this.recipeCategory = recipeCategory;
@@ -34,7 +40,7 @@ public class RecipeTypeData<T> {
 
 	@UnmodifiableView
 	public List<T> getRecipes() {
-		return Collections.unmodifiableList(recipes);
+		return recipesView;
 	}
 
 	public void addRecipes(Collection<T> recipes) {
@@ -43,5 +49,16 @@ public class RecipeTypeData<T> {
 
 	public Set<T> getHiddenRecipes() {
 		return hiddenRecipes;
+	}
+
+	/**
+	 * Trims the recipe list to size once loading is done. An ArrayList grown by repeated addAll
+	 * can hold up to ~50% slack, which across every recipe type is a lot of dead array space.
+	 */
+	public void compact() {
+		// Lock on the synchronized wrapper's monitor, which is what its own methods use.
+		synchronized (recipes) {
+			backingRecipes.trimToSize();
+		}
 	}
 }

@@ -30,10 +30,10 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.EnumMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 
 public class RecipeManagerInternal {
@@ -46,7 +46,9 @@ public class RecipeManagerInternal {
 	private final Comparator<IRecipeCategory<?>> recipeCategoryComparator;
 	private final EnumMap<RecipeIngredientRole, RecipeMap> recipeMaps;
 	private final PluginManager pluginManager;
-	private final Set<RecipeType<?>> hiddenRecipeTypes = java.util.Collections.synchronizedSet(new HashSet<>());
+	// Read once per category per frame from isCategoryHidden, and almost always empty. A
+	// synchronizedSet made every one of those reads take a monitor on the render thread.
+	private final Set<RecipeType<?>> hiddenRecipeTypes = ConcurrentHashMap.newKeySet();
 	private final IIngredientVisibility ingredientVisibility;
 	private ImmutableListMultimap<RecipeType<?>, IRecipeCategoryDecorator<?>> recipeCategoryDecorators;
 
@@ -294,6 +296,7 @@ public class RecipeManagerInternal {
 
 	public void compact() {
 		recipeMaps.values().forEach(RecipeMap::compact);
+		recipeTypeDataMap.values().forEach(RecipeTypeData::compact);
 	}
 
 	public boolean isRecipeCatalyst(RecipeType<?> recipeType, IFocus<?> focus) {

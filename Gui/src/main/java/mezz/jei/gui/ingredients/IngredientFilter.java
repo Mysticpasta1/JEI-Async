@@ -93,9 +93,18 @@ public class IngredientFilter implements
 		for (IListElementInfo<?> ingredient : ingredients) {
 			updateHiddenState(ingredient.getElement());
 		}
-		if (this.elementSearch instanceof ElementSearch elementSearchImpl && searchStringCache != null) {
+		if (this.elementSearch instanceof ElementSearch elementSearchImpl) {
+			if (searchStringCache != null) {
+				// Collect whatever we end up deriving, so the next launch can skip it.
+				searchStringCache.startCollecting();
+			}
 			elementSearchImpl.addAll(ingredients, ingredientManager, searchStringCache);
 		} else {
+			// The low-memory search does not use the cache; drop it rather than holding every
+			// cached search string for the rest of the session.
+			if (searchStringCache != null) {
+				searchStringCache.release();
+			}
 			this.elementSearch.addAll(ingredients, ingredientManager);
 		}
 		LOGGER.info("Added {} ingredients", ingredients.size());
@@ -103,6 +112,9 @@ public class IngredientFilter implements
 			this.elementSearch.logStatistics();
 		}
 
+		// Saving and releasing the cache happens inside processDeferredTooltips, because when this
+		// runs on the background loader that call defers to the render thread and returns before
+		// the tooltip strings actually exist.
 		this.elementSearch.processDeferredTooltips();
 
 		this.filterTextSource.addListener(filterText -> {

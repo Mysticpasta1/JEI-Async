@@ -23,11 +23,11 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class SearchStringCache {
 	private static final Logger LOGGER = LogManager.getLogger();
@@ -41,9 +41,9 @@ public class SearchStringCache {
 	private final String cacheKey;
 
 	@Nullable
-	private Map<String, Map<String, List<String>>> cachedData;
+	private volatile Map<String, Map<String, List<String>>> cachedData;
 	@Nullable
-	private Map<String, Map<String, List<String>>> collectedData;
+	private volatile Map<String, Map<String, List<String>>> collectedData;
 
 	public SearchStringCache(String cacheKey) {
 		Path configDir = Services.PLATFORM.getConfigHelper().createJeiConfigDir();
@@ -92,10 +92,11 @@ public class SearchStringCache {
 
 	@Nullable
 	public List<String> getCachedStrings(String ingredientUid, char prefixChar) {
-		if (cachedData == null) {
+		Map<String, Map<String, List<String>>> cached = cachedData;
+		if (cached == null) {
 			return null;
 		}
-		Map<String, List<String>> prefixMap = cachedData.get(ingredientUid);
+		Map<String, List<String>> prefixMap = cached.get(ingredientUid);
 		if (prefixMap == null) {
 			return null;
 		}
@@ -107,15 +108,34 @@ public class SearchStringCache {
 	}
 
 	public void startCollecting() {
-		this.collectedData = new HashMap<>();
+		// Written from the background loader and from the render thread (deferred tooltips).
+		this.collectedData = new ConcurrentHashMap<>();
 	}
 
+	/**
+	 * Records the search strings for one ingredient and prefix.
+	 * <p>
+	 * Empty results are recorded too. Most ingredients have no tooltip lines beyond the name and
+	 * mod name, which are stripped out; if those were left unrecorded they would look like cache
+	 * misses on the next load and be re-derived, which is exactly the expensive work being avoided.
+	 */
 	public void recordStrings(String ingredientUid, char prefixChar, Collection<String> strings) {
-		if (collectedData == null) {
+		Map<String, Map<String, List<String>>> collected = collectedData;
+		if (collected == null) {
 			return;
 		}
-		Map<String, List<String>> prefixMap = collectedData.computeIfAbsent(ingredientUid, k -> new HashMap<>());
+		Map<String, List<String>> prefixMap = collected.computeIfAbsent(ingredientUid, k -> new ConcurrentHashMap<>());
 		prefixMap.put(String.valueOf(prefixChar), List.copyOf(strings));
+	}
+
+	/**
+	 * Drops the loaded cache once the search index has been built from it. Everything in here is
+	 * already in the search storage at that point, so holding a second copy of every search string
+	 * for every ingredient is pure waste.
+	 */
+	public void release() {
+		this.cachedData = null;
+		this.collectedData = null;
 	}
 
 	public void saveAsync() {

@@ -71,7 +71,7 @@ public final class JeiStarter {
 		}
 		return loadingExecutor;
 	}
-	private static final String EXPECTED_VERSION = "15.20.0.130-async-30"; // Current JEI-Async version
+	private static final String EXPECTED_VERSION = "15.20.0.130-async-31"; // Current JEI-Async version
 
 	private final StartData data;
 	private final List<IModPlugin> plugins;
@@ -373,7 +373,10 @@ public final class JeiStarter {
 				runtimeRegistration.getIngredientFilter(),
 				configManager
 		);
-		Internal.setRuntime(jeiRuntime);
+		// NOTE: deliberately not publishing the runtime here. On the async path this method runs
+		// on the background loader, so setting it here let the render thread pick up a runtime
+		// whose ingredient list was still being built, stalling the frame that touched it.
+		// Both callers publish it themselves once loading has actually finished.
 		timer.stop();
 
 		loadingState = LoadingState.COMPLETE;
@@ -435,10 +438,16 @@ public final class JeiStarter {
 		delegatingRecipeManager.setDelegate(null);
 
 		// Shutdown executors to release threads and any captured references
+		ExecutorService executorToStop;
 		synchronized (JeiStarter.class) {
-			if (loadingExecutor != null && !loadingExecutor.isShutdown()) {
-				loadingExecutor.shutdownNow();
-			}
+			executorToStop = loadingExecutor;
+			// Drop the static reference too, otherwise the finished executor (and the loading
+			// task it ran, which captures this JeiStarter and the old runtime) stays reachable
+			// for the rest of the game session.
+			loadingExecutor = null;
+		}
+		if (executorToStop != null && !executorToStop.isShutdown()) {
+			executorToStop.shutdownNow();
 		}
 		PluginCaller.shutdown();
 

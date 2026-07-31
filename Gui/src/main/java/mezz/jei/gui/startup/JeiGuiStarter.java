@@ -2,6 +2,9 @@ package mezz.jei.gui.startup;
 
 import mezz.jei.api.helpers.IColorHelper;
 import mezz.jei.api.helpers.IGuiHelper;
+import mezz.jei.api.ingredients.IIngredientHelper;
+import mezz.jei.api.ingredients.ITypedIngredient;
+import mezz.jei.api.ingredients.subtypes.UidContext;
 import mezz.jei.api.helpers.IJeiHelpers;
 import mezz.jei.api.helpers.IModIdHelper;
 import mezz.jei.api.recipe.IFocusFactory;
@@ -53,6 +56,7 @@ import mezz.jei.gui.overlay.IngredientListOverlay;
 import mezz.jei.gui.overlay.bookmarks.BookmarkOverlay;
 import mezz.jei.gui.overlay.bookmarks.history.LookupHistory;
 import mezz.jei.gui.recipes.RecipesGui;
+import mezz.jei.gui.search.SearchStringCache;
 import mezz.jei.gui.util.FocusUtil;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -60,6 +64,7 @@ import net.minecraft.core.RegistryAccess;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
@@ -127,6 +132,13 @@ public class JeiGuiStarter {
 			ingredientList
 		);
 
+		// Deriving search strings means generating a full tooltip for every ingredient, which fires
+		// the mod tooltip events once per ingredient and has to happen on the render thread. In a
+		// large pack that is minutes of frozen client on every single launch. Caching the results
+		// keyed by the exact set of ingredients and the language means it only happens when
+		// something actually changed.
+		SearchStringCache searchStringCache = createSearchStringCache(ingredientList, ingredientManager);
+
 		IngredientFilter ingredientFilter = new IngredientFilter(
 			filterTextSource,
 			clientConfig,
@@ -138,7 +150,7 @@ public class JeiGuiStarter {
 			ingredientVisibility,
 			colorHelper,
 			toggleState,
-			null
+			searchStringCache
 		);
 		ingredientManager.registerIngredientListener(ingredientFilter);
 		ingredientVisibility.registerListener(ingredientFilter);
@@ -254,5 +266,36 @@ public class JeiGuiStarter {
 			clientInputHandler,
 			resourceReloadHandler
 		);
+	}
+
+	/**
+	 * Builds the search string cache for this exact ingredient set.
+	 * <p>
+	 * The key covers every ingredient uid plus the active language, so adding, removing or updating
+	 * a mod, or switching language, invalidates it and the strings get derived again. Returns a
+	 * cache that simply misses everything if the key cannot be computed.
+	 */
+	private static SearchStringCache createSearchStringCache(List<IListElementInfo<?>> ingredientList, IIngredientManager ingredientManager) {
+		LoggedTimer timer = new LoggedTimer();
+		timer.start("Loading search string cache");
+		List<String> uids = new ArrayList<>(ingredientList.size());
+		for (IListElementInfo<?> info : ingredientList) {
+			try {
+				ITypedIngredient<?> typedIngredient = info.getTypedIngredient();
+				uids.add(getUidString(typedIngredient, ingredientManager));
+			} catch (RuntimeException | LinkageError e) {
+				LOGGER.debug("Failed to compute a search cache uid for an ingredient", e);
+			}
+		}
+		String locale = Minecraft.getInstance().getLanguageManager().getSelected();
+		SearchStringCache cache = new SearchStringCache(SearchStringCache.computeCacheKey(uids, locale));
+		cache.load();
+		timer.stop();
+		return cache;
+	}
+
+	private static <T> String getUidString(ITypedIngredient<T> typedIngredient, IIngredientManager ingredientManager) {
+		IIngredientHelper<T> ingredientHelper = ingredientManager.getIngredientHelper(typedIngredient.getType());
+		return ingredientHelper.getUniqueId(typedIngredient.getIngredient(), UidContext.Ingredient).toString();
 	}
 }

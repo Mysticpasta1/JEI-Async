@@ -16,6 +16,10 @@ public class PrefixedSearchable<T, I> implements ISearchable<I> {
 		return searchStorage;
 	}
 
+	public PrefixInfo<T, I> getPrefixInfo() {
+		return prefixInfo;
+	}
+
 	public Collection<String> getStrings(T element) {
 		return prefixInfo.getStrings(element);
 	}
