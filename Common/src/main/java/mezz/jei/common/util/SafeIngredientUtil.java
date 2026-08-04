@@ -2,6 +2,7 @@ package mezz.jei.common.util;
 
 import com.mojang.blaze3d.systems.RenderSystem;
 import mezz.jei.api.gui.builder.ITooltipBuilder;
+import mezz.jei.api.helpers.IJeiHelpers;
 import mezz.jei.api.ingredients.IIngredientRenderer;
 import mezz.jei.api.ingredients.IIngredientType;
 import mezz.jei.api.ingredients.ITypedIngredient;
@@ -184,7 +185,15 @@ public final class SafeIngredientUtil {
 		} catch (Exception | Error e) {
 			CRASHING_INGREDIENT_RENDERERS.add(ingredient);
 
-			IIngredientManager ingredientManager = Internal.getJeiRuntime().getIngredientManager();
+			IIngredientManager ingredientManager = Internal.getOptionalJeiHelpers()
+				.map(IJeiHelpers::getIngredientManager)
+				.orElse(null);
+			if (ingredientManager == null) {
+				// Nothing to build a detailed report from; don't let the error handler throw its own error.
+				LOGGER.error("Caught an error rendering an Ingredient", e);
+				renderError(guiGraphics);
+				return;
+			}
 			if (shouldCatchRenderErrors()) {
 				ErrorUtil.logIngredientCrash(e, "Caught an error rendering an Ingredient", ingredientManager, ingredientType, ingredient);
 				renderError(guiGraphics);

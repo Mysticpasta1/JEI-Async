@@ -1,5 +1,6 @@
 package mezz.jei.gui.overlay.bookmarks;
 
+import mezz.jei.api.helpers.IJeiHelpers;
 import mezz.jei.api.ingredients.IIngredientRenderer;
 import mezz.jei.api.ingredients.IIngredientType;
 import mezz.jei.api.ingredients.ITypedIngredient;
@@ -57,8 +58,13 @@ public class BookmarkDragManager {
 				ITypedIngredient<V> ingredient = clicked.getTypedIngredient();
 				IIngredientType<V> type = ingredient.getType();
 
+				IIngredientManager ingredientManager = Internal.getOptionalJeiHelpers()
+					.map(IJeiHelpers::getIngredientManager)
+					.orElse(null);
+				if (ingredientManager == null) {
+					return false;
+				}
 				List<IBookmarkDragTarget> targets = bookmarkOverlay.createBookmarkDragTargets();
-				IIngredientManager ingredientManager = Internal.getJeiRuntime().getIngredientManager();
 				IIngredientRenderer<V> ingredientRenderer = ingredientManager.getIngredientRenderer(type);
 				ImmutableRect2i clickedArea = clicked.getArea();
 				this.bookmarkDrag = new BookmarkDrag<>(

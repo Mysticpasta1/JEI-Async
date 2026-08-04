@@ -59,7 +59,7 @@ public class OutputSlotTooltipCallback implements IRecipeSlotRichTooltipCallback
 		if (recipeFromSameModAsCategory) {
 			return;
 		}
-		IModIdHelper modIdHelper = Internal.getJeiRuntime().getJeiHelpers().getModIdHelper();
+		IModIdHelper modIdHelper = Internal.getJeiHelpers().getModIdHelper();
 		if (!modIdHelper.isDisplayingModNameEnabled()) {
 			return;
 		}
@@ -77,7 +77,7 @@ public class OutputSlotTooltipCallback implements IRecipeSlotRichTooltipCallback
 	}
 
 	private <T> @Nullable String getDisplayModId(ITypedIngredient<T> typedIngredient) {
-		IIngredientManager ingredientManager = Internal.getJeiRuntime().getIngredientManager();
+		IIngredientManager ingredientManager = Internal.getJeiHelpers().getIngredientManager();
 
 		IIngredientType<T> type = typedIngredient.getType();
 		T ingredient = typedIngredient.getIngredient();

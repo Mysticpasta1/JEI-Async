@@ -2,6 +2,7 @@ package mezz.jei.gui.recipes;
 
 import mezz.jei.api.gui.drawable.IDrawable;
 import mezz.jei.api.helpers.IGuiHelper;
+import mezz.jei.api.helpers.IJeiHelpers;
 import mezz.jei.api.helpers.IModIdHelper;
 import mezz.jei.api.recipe.IRecipeManager;
 import mezz.jei.api.recipe.category.IRecipeCategory;
@@ -84,8 +85,10 @@ public class RecipeCategoryTab extends RecipeGuiTab {
 
 		ResourceLocation uid = category.getRecipeType().getUid();
 		String modId = uid.getNamespace();
-		IModIdHelper modIdHelper = Internal.getJeiRuntime().getJeiHelpers().getModIdHelper();
-		if (modIdHelper.isDisplayingModNameEnabled()) {
+		IModIdHelper modIdHelper = Internal.getOptionalJeiHelpers()
+			.map(IJeiHelpers::getModIdHelper)
+			.orElse(null);
+		if (modIdHelper != null && modIdHelper.isDisplayingModNameEnabled()) {
 			String modName = modIdHelper.getFormattedModNameForModId(modId);
 			tooltip.add(Component.literal(modName));
 		}

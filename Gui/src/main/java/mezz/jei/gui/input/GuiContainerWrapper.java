@@ -1,5 +1,6 @@
 package mezz.jei.gui.input;
 
+import mezz.jei.api.helpers.IJeiHelpers;
 import mezz.jei.api.ingredients.IIngredientType;
 import mezz.jei.api.ingredients.ITypedIngredient;
 import mezz.jei.api.runtime.IClickableIngredient;
@@ -41,10 +42,14 @@ public class GuiContainerWrapper implements IRecipeFocusSource {
 	}
 
 	private <T> Optional<ITypedIngredient<T>> createTypedIngredient(IClickableIngredient<T> clickableIngredient) {
-		IIngredientManager ingredientManager = Internal.getJeiRuntime().getIngredientManager();
+		Optional<IIngredientManager> ingredientManager = Internal.getOptionalJeiHelpers()
+			.map(IJeiHelpers::getIngredientManager);
+		if (ingredientManager.isEmpty()) {
+			return Optional.empty();
+		}
 		IIngredientType<T> ingredientType = clickableIngredient.getIngredientType();
 		T ingredient = clickableIngredient.getIngredient();
-		return ingredientManager.createTypedIngredient(ingredientType, ingredient);
+		return ingredientManager.get().createTypedIngredient(ingredientType, ingredient);
 	}
 
 	@Override

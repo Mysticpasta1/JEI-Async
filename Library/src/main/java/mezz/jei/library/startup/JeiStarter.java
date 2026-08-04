@@ -71,7 +71,7 @@ public final class JeiStarter {
 		}
 		return loadingExecutor;
 	}
-	private static final String EXPECTED_VERSION = "15.20.0.130-async-31"; // Current JEI-Async version
+	private static final String EXPECTED_VERSION = "15.20.0.130-async-32"; // Current JEI-Async version
 
 	private final StartData data;
 	private final List<IModPlugin> plugins;
@@ -307,6 +307,10 @@ public final class JeiStarter {
 
 		JeiHelpers jeiHelpers = PluginLoader.createJeiHelpers(modIdFormatConfig, colorHelper, editModeConfig, focusFactory, ingredientManager, subtypeManager);
 		delegatingJeiHelpers.setDelegate(jeiHelpers);
+		// Publish the helpers now, not with the runtime: recipe category and layout code below runs on
+		// the background loader and needs the gui helper / ingredient manager long before the runtime
+		// is available. Publishing only after setDelegate keeps "present" equivalent to "usable".
+		Internal.setJeiHelpers(delegatingJeiHelpers);
 
 		if (cancelled) {
 			throw new CancelledException();
@@ -434,6 +438,7 @@ public final class JeiStarter {
 		RegistryUtil.setRegistryAccess(null);
 
 		// Release references to old runtime data to prevent memory leaks
+		Internal.setJeiHelpers(null);
 		delegatingJeiHelpers.setDelegate(null);
 		delegatingRecipeManager.setDelegate(null);
 

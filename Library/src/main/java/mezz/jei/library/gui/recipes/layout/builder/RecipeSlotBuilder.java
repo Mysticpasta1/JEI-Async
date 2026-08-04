@@ -105,7 +105,7 @@ public class RecipeSlotBuilder implements IRecipeSlotBuilder {
 
 	@Override
 	public IRecipeSlotBuilder setStandardSlotBackground() {
-		IGuiHelper guiHelper = Internal.getJeiRuntime().getJeiHelpers().getGuiHelper();
+		IGuiHelper guiHelper = Internal.getJeiHelpers().getGuiHelper();
 		IDrawableStatic background = guiHelper.getSlotDrawable();
 		this.background = new OffsetDrawable(background, -1, -1);
 		return this;
@@ -113,7 +113,7 @@ public class RecipeSlotBuilder implements IRecipeSlotBuilder {
 
 	@Override
 	public IRecipeSlotBuilder setOutputSlotBackground() {
-		IGuiHelper guiHelper = Internal.getJeiRuntime().getJeiHelpers().getGuiHelper();
+		IGuiHelper guiHelper = Internal.getJeiHelpers().getGuiHelper();
 		IDrawableStatic background = guiHelper.getOutputSlot();
 		this.background = new OffsetDrawable(background, -5, -5);
 		return this;

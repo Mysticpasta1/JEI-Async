@@ -4,6 +4,7 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import mezz.jei.api.gui.IRecipeLayoutDrawable;
 import mezz.jei.api.recipe.transfer.IRecipeTransferError;
 import mezz.jei.api.recipe.transfer.IRecipeTransferManager;
+import mezz.jei.api.runtime.IJeiRuntime;
 import mezz.jei.common.Internal;
 import mezz.jei.common.transfer.RecipeTransferUtil;
 import net.minecraft.client.Minecraft;
@@ -69,9 +70,11 @@ public class PreviewTooltipComponent<R> implements ClientTooltipComponent, Toolt
 			return;
 		}
 		Screen screen = Minecraft.getInstance().screen;
-		if (screen instanceof AbstractContainerScreen<?> containerScreen) {
+		IRecipeTransferManager recipeTransferManager = Internal.getOptionalJeiRuntime()
+			.map(IJeiRuntime::getRecipeTransferManager)
+			.orElse(null);
+		if (recipeTransferManager != null && screen instanceof AbstractContainerScreen<?> containerScreen) {
 			AbstractContainerMenu container = containerScreen.getMenu();
-			IRecipeTransferManager recipeTransferManager = Internal.getJeiRuntime().getRecipeTransferManager();
 			transferError = RecipeTransferUtil.getTransferRecipeError(recipeTransferManager, container, drawable, player)
 				.orElse(null);
 		} else {

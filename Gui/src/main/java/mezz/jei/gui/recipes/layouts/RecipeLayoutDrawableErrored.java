@@ -12,7 +12,6 @@ import mezz.jei.api.helpers.IGuiHelper;
 import mezz.jei.api.helpers.IJeiHelpers;
 import mezz.jei.api.ingredients.IIngredientType;
 import mezz.jei.api.recipe.category.IRecipeCategory;
-import mezz.jei.api.runtime.IJeiRuntime;
 import mezz.jei.common.Internal;
 import mezz.jei.common.util.ImmutableRect2i;
 import mezz.jei.gui.input.handlers.OffsetJeiInputHandler;
@@ -54,8 +53,9 @@ public class RecipeLayoutDrawableErrored<R> implements IRecipeLayoutDrawable<R> 
 			lines.add(Component.literal(registryName.toString()).withStyle(ChatFormatting.GRAY));
 		}
 
-		IJeiRuntime jeiRuntime = Internal.getJeiRuntime();
-		IJeiHelpers jeiHelpers = jeiRuntime.getJeiHelpers();
+		// Errored layouts are built alongside normal ones, which happens on the background loader
+		// before the runtime is published, so this must come from the helpers rather than the runtime.
+		IJeiHelpers jeiHelpers = Internal.getJeiHelpers();
 		IGuiHelper guiHelper = jeiHelpers.getGuiHelper();
 		this.scrollBoxWidget = guiHelper.createScrollBoxWidget(area.width(), area.getHeight(), 0, 0)
 			.setContents(lines);

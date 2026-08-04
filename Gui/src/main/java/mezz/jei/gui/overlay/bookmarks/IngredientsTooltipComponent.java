@@ -4,6 +4,7 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import mezz.jei.api.gui.IRecipeLayoutDrawable;
 import mezz.jei.api.gui.ingredient.IRecipeSlotView;
 import mezz.jei.api.gui.ingredient.IRecipeSlotsView;
+import mezz.jei.api.helpers.IJeiHelpers;
 import mezz.jei.api.ingredients.IIngredientHelper;
 import mezz.jei.api.ingredients.IIngredientRenderer;
 import mezz.jei.api.ingredients.IIngredientType;
@@ -31,7 +32,13 @@ public class IngredientsTooltipComponent implements ClientTooltipComponent, Tool
 	private final List<RenderElement<?>> ingredients;
 
 	public IngredientsTooltipComponent(IRecipeLayoutDrawable<?> layout) {
-		IIngredientManager ingredientManager = Internal.getJeiRuntime().getIngredientManager();
+		IIngredientManager ingredientManager = Internal.getOptionalJeiHelpers()
+			.map(IJeiHelpers::getIngredientManager)
+			.orElse(null);
+		if (ingredientManager == null) {
+			this.ingredients = List.of();
+			return;
+		}
 		IRecipeSlotsView recipeSlotsView = layout.getRecipeSlotsView();
 		Map<String, SummaryElement<?>> summary = new HashMap<>();
 		recipeSlotsView.getSlotViews(RecipeIngredientRole.INPUT)

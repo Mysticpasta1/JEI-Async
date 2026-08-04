@@ -98,7 +98,12 @@ public class RecipeBookmarkElement<R, I> implements IElement<I> {
 					return false;
 				}
 
-				IRecipeTransferManager recipeTransferManager = Internal.getJeiRuntime().getRecipeTransferManager();
+				IRecipeTransferManager recipeTransferManager = Internal.getOptionalJeiRuntime()
+					.map(IJeiRuntime::getRecipeTransferManager)
+					.orElse(null);
+				if (recipeTransferManager == null) {
+					return false;
+				}
 				AbstractContainerMenu container = containerScreen.getMenu();
 				if (input.isSimulate()) {
 					IRecipeTransferError recipeTransferError = RecipeTransferUtil.getTransferRecipeError(recipeTransferManager, container, recipeLayout, player).orElse(null);
@@ -132,10 +137,10 @@ public class RecipeBookmarkElement<R, I> implements IElement<I> {
 
 		addBookmarkTooltipFeaturesIfEnabled(tooltip);
 
-		if (recipeBookmark.getDisplayRole() == RecipeIngredientRole.OUTPUT) {
-			IJeiRuntime jeiRuntime = Internal.getJeiRuntime();
-			IIngredientManager ingredientManager = jeiRuntime.getIngredientManager();
-			IModIdHelper modIdHelper = jeiRuntime.getJeiHelpers().getModIdHelper();
+		IJeiHelpers jeiHelpers = Internal.getOptionalJeiHelpers().orElse(null);
+		if (jeiHelpers != null && recipeBookmark.getDisplayRole() == RecipeIngredientRole.OUTPUT) {
+			IIngredientManager ingredientManager = jeiHelpers.getIngredientManager();
+			IModIdHelper modIdHelper = jeiHelpers.getModIdHelper();
 
 			ResourceLocation recipeName = recipeCategory.getRegistryName(recipe);
 			if (recipeName != null) {
@@ -205,12 +210,13 @@ public class RecipeBookmarkElement<R, I> implements IElement<I> {
 		Player player = minecraft.player;
 		if (player != null && screen instanceof AbstractContainerScreen<?> containerScreen) {
 			IRecipeTransferError recipeTransferError = getRecipeLayoutDrawable()
-				.flatMap(recipeLayout -> {
-					IJeiRuntime jeiRuntime = Internal.getJeiRuntime();
-					IRecipeTransferManager recipeTransferManager = jeiRuntime.getRecipeTransferManager();
-					AbstractContainerMenu container = containerScreen.getMenu();
-					return RecipeTransferUtil.getTransferRecipeError(recipeTransferManager, container, recipeLayout, player);
-				})
+				.flatMap(recipeLayout -> Internal.getOptionalJeiRuntime()
+					.map(IJeiRuntime::getRecipeTransferManager)
+					.flatMap(recipeTransferManager -> {
+						AbstractContainerMenu container = containerScreen.getMenu();
+						return RecipeTransferUtil.getTransferRecipeError(recipeTransferManager, container, recipeLayout, player);
+					})
+				)
 				.orElse(null);
 
 			if (recipeTransferError == null || recipeTransferError.getType().allowsTransfer) {
@@ -238,7 +244,11 @@ public class RecipeBookmarkElement<R, I> implements IElement<I> {
 	private Optional<IRecipeLayoutDrawable<R>> getRecipeLayoutDrawable() {
 		//noinspection OptionalAssignedToNull
 		if (cachedLayoutDrawable == null) {
-			IJeiRuntime jeiRuntime = Internal.getJeiRuntime();
+			IJeiRuntime jeiRuntime = Internal.getOptionalJeiRuntime().orElse(null);
+			if (jeiRuntime == null) {
+				// Don't cache this: the layout is buildable again once the runtime shows up.
+				return Optional.empty();
+			}
 			IRecipeManager recipeManager = jeiRuntime.getRecipeManager();
 			IFocusFactory focusFactory = jeiRuntime.getJeiHelpers().getFocusFactory();
 			IScalableDrawable recipePreviewBackground = Internal.getTextures().getRecipePreviewBackground();

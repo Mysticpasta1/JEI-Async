@@ -7,6 +7,7 @@ import mezz.jei.api.gui.drawable.IDrawable;
 import mezz.jei.api.gui.ingredient.IRecipeSlotDrawable;
 import mezz.jei.api.gui.ingredient.IRecipeSlotRichTooltipCallback;
 import mezz.jei.api.gui.ingredient.IRecipeSlotView;
+import mezz.jei.api.helpers.IJeiHelpers;
 import mezz.jei.api.ingredients.IIngredientHelper;
 import mezz.jei.api.ingredients.IIngredientRenderer;
 import mezz.jei.api.ingredients.IIngredientType;
@@ -14,7 +15,6 @@ import mezz.jei.api.ingredients.ITypedIngredient;
 import mezz.jei.api.recipe.RecipeIngredientRole;
 import mezz.jei.api.runtime.IIngredientManager;
 import mezz.jei.api.runtime.IIngredientVisibility;
-import mezz.jei.api.runtime.IJeiRuntime;
 import mezz.jei.common.Internal;
 import mezz.jei.common.config.IClientConfig;
 import mezz.jei.common.gui.JeiTooltip;
@@ -116,13 +116,21 @@ public class RecipeSlot implements IRecipeSlotView, IRecipeSlotDrawable {
 			return List.of();
 		}
 
+		// The helpers are gone while JEI is loading and after the world is torn down.
+		// There is nothing to filter with then, so show everything instead of crashing mid-render.
+		IIngredientVisibility ingredientVisibility = Internal.getOptionalJeiHelpers()
+			.map(IJeiHelpers::getIngredientVisibility)
+			.orElse(null);
+		if (ingredientVisibility == null) {
+			return limitDisplayedIngredients(allIngredients);
+		}
+
 		List<Optional<ITypedIngredient<?>>> visibleIngredients = List.of();
 		boolean hasInvisibleIngredients = false;
 
 		// hide invisible ingredients if there are any
 		// try scanning through all the ingredients without building the list of visible ingredients.
 		// if an invisible ingredient is found, start building the list of visible ingredients
-		IIngredientVisibility ingredientVisibility = Internal.getJeiRuntime().getJeiHelpers().getIngredientVisibility();
 		for (int i = 0; i < allIngredients.size() && visibleIngredients.size() < MAX_DISPLAYED_INGREDIENTS; i++) {
 			Optional<ITypedIngredient<?>> ingredient = allIngredients.get(i);
 			boolean visible = ingredient.isEmpty() || ingredientVisibility.isIngredientVisible(ingredient.get());
@@ -144,6 +152,10 @@ public class RecipeSlot implements IRecipeSlotView, IRecipeSlotDrawable {
 
 		// either everything is visible or everything is invisible.
 		// if everything is invisible, we show them all anyway so that the recipe slot isn't blank
+		return limitDisplayedIngredients(allIngredients);
+	}
+
+	private static List<Optional<ITypedIngredient<?>>> limitDisplayedIngredients(List<Optional<ITypedIngredient<?>>> allIngredients) {
 		if (allIngredients.size() < MAX_DISPLAYED_INGREDIENTS) {
 			// re-use allIngredients to save some memory
 			return allIngredients;
@@ -182,7 +194,7 @@ public class RecipeSlot implements IRecipeSlotView, IRecipeSlotDrawable {
 	}
 
 	private <T> void getTooltip(ITooltipBuilder tooltip, ITypedIngredient<T> typedIngredient) {
-		IIngredientManager ingredientManager = Internal.getJeiRuntime().getIngredientManager();
+		IIngredientManager ingredientManager = Internal.getJeiHelpers().getIngredientManager();
 
 		IIngredientType<T> ingredientType = typedIngredient.getType();
 		IIngredientRenderer<T> ingredientRenderer = getIngredientRenderer(ingredientType);
@@ -196,7 +208,7 @@ public class RecipeSlot implements IRecipeSlotView, IRecipeSlotDrawable {
 	}
 
 	private <T> List<Component> legacyGetTooltip(ITypedIngredient<T> typedIngredient) {
-		IIngredientManager ingredientManager = Internal.getJeiRuntime().getIngredientManager();
+		IIngredientManager ingredientManager = Internal.getJeiHelpers().getIngredientManager();
 
 		IIngredientType<T> ingredientType = typedIngredient.getType();
 		IIngredientRenderer<T> ingredientRenderer = getIngredientRenderer(ingredientType);
@@ -243,8 +255,7 @@ public class RecipeSlot implements IRecipeSlotView, IRecipeSlotDrawable {
 		if (clientConfig.isTagContentTooltipEnabled()) {
 			IIngredientType<T> type = displayed.getType();
 
-			IJeiRuntime jeiRuntime = Internal.getJeiRuntime();
-			IIngredientManager ingredientManager = jeiRuntime.getIngredientManager();
+			IIngredientManager ingredientManager = Internal.getJeiHelpers().getIngredientManager();
 			IIngredientRenderer<T> renderer = ingredientManager.getIngredientRenderer(type);
 
 			List<T> ingredients = getIngredients(type).toList();
@@ -265,7 +276,7 @@ public class RecipeSlot implements IRecipeSlotView, IRecipeSlotDrawable {
 		return Optional.ofNullable(rendererOverrides)
 			.flatMap(r -> r.getIngredientRenderer(ingredientType))
 			.orElseGet(() -> {
-				IIngredientManager ingredientManager = Internal.getJeiRuntime().getIngredientManager();
+				IIngredientManager ingredientManager = Internal.getJeiHelpers().getIngredientManager();
 				return ingredientManager.getIngredientRenderer(ingredientType);
 			});
 	}
@@ -344,7 +355,7 @@ public class RecipeSlot implements IRecipeSlotView, IRecipeSlotDrawable {
 	@Override
 	public IIngredientConsumer createDisplayOverrides() {
 		if (displayOverrides == null) {
-			IIngredientManager ingredientManager = Internal.getJeiRuntime().getIngredientManager();
+			IIngredientManager ingredientManager = Internal.getJeiHelpers().getIngredientManager();
 			displayOverrides = new DisplayIngredientAcceptor(ingredientManager);
 		}
 		return displayOverrides;

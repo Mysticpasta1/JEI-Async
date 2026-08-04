@@ -6,6 +6,7 @@ import mezz.jei.api.gui.drawable.IDrawable;
 import mezz.jei.api.gui.ingredient.IRecipeSlotsView;
 import mezz.jei.api.recipe.transfer.IRecipeTransferError;
 import mezz.jei.api.recipe.transfer.IRecipeTransferManager;
+import mezz.jei.api.runtime.IJeiRuntime;
 import mezz.jei.common.Internal;
 import mezz.jei.common.gui.JeiTooltip;
 import mezz.jei.common.gui.textures.Textures;
@@ -57,8 +58,10 @@ public class RecipeTransferButton extends GuiIconToggleButton {
 		this.parentContainer = parentContainer;
 		this.initialized = true;
 
-		if (parentContainer != null && player != null) {
-			IRecipeTransferManager recipeTransferManager = Internal.getJeiRuntime().getRecipeTransferManager();
+		IRecipeTransferManager recipeTransferManager = Internal.getOptionalJeiRuntime()
+			.map(IJeiRuntime::getRecipeTransferManager)
+			.orElse(null);
+		if (parentContainer != null && player != null && recipeTransferManager != null) {
 			this.recipeTransferError = RecipeTransferUtil.getTransferRecipeError(recipeTransferManager, parentContainer, recipeLayout, player)
 				.orElse(null);
 		} else {
@@ -79,9 +82,11 @@ public class RecipeTransferButton extends GuiIconToggleButton {
 	@Override
 	protected boolean onMouseClicked(UserInput input) {
 		if (!input.isSimulate()) {
-			IRecipeTransferManager recipeTransferManager = Internal.getJeiRuntime().getRecipeTransferManager();
+			IRecipeTransferManager recipeTransferManager = Internal.getOptionalJeiRuntime()
+				.map(IJeiRuntime::getRecipeTransferManager)
+				.orElse(null);
 			boolean maxTransfer = Screen.hasShiftDown();
-			if (parentContainer != null && player != null && RecipeTransferUtil.transferRecipe(recipeTransferManager, parentContainer, recipeLayout, player, maxTransfer)) {
+			if (recipeTransferManager != null && parentContainer != null && player != null && RecipeTransferUtil.transferRecipe(recipeTransferManager, parentContainer, recipeLayout, player, maxTransfer)) {
 				onClose.run();
 			}
 		}
