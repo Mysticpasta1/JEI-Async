@@ -83,7 +83,7 @@ public final class JeiStarter {
 		}
 		return loadingExecutor;
 	}
-	private static final String EXPECTED_VERSION = "15.32.0-async-33"; // Current JEI-Async version
+	private static final String EXPECTED_VERSION = "15.32.0.173-async-33"; // Current JEI-Async version
 	private static final String VANILLA_SERVER_BRAND = "vanilla";
 
 	private final StartData data;
