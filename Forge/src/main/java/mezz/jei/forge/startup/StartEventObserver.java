@@ -1,83 +1,87 @@
 package mezz.jei.forge.startup;
 
 import mezz.jei.common.Internal;
+import mezz.jei.common.network.IConnectionToServer;
 import mezz.jei.forge.events.PermanentEventSubscriptions;
 import mezz.jei.gui.overlay.LoadingOverlayRenderer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.client.multiplayer.ClientPacketListener;
+import net.minecraft.network.Connection;
+import net.minecraft.server.packs.resources.ResourceManager;
+import net.minecraft.server.packs.resources.ResourceManagerReloadListener;
 import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.client.event.RecipesUpdatedEvent;
 import net.minecraftforge.client.event.ScreenEvent;
-import net.minecraftforge.event.TagsUpdatedEvent;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.Event;
+import net.minecraftforge.eventbus.api.EventPriority;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.jetbrains.annotations.Nullable;
 
-import java.util.HashSet;
-import java.util.Set;
+import java.lang.ref.WeakReference;
 
 /**
  * This class observes events and determines when it's the right time to start JEI.
- * <p>
- * JEI needs to see both the {@link TagsUpdatedEvent} and {@link RecipesUpdatedEvent}
- * before it is ready to start.
- * <p>
- * Depending on the configuration (Integrated server, vanilla server, modded server),
- * these events might come in any order.
- * <p>
- * Additionally, JEI waits for the world to finish loading before completing initialization.
- * This ensures that the world is fully loaded before JEI finishes, preventing issues with
- * world-dependent operations during JEI startup.
+ *
+ * JEI needs to see {@link ClientPlayerNetworkEvent.LoggingIn} before it is ready to start. When
+ * the connection can provide server recipe content, JEI also waits for {@link RecipesUpdatedEvent}
+ * so it does not briefly start with fallback client recipes.
+ *
+ * Connections that never provide synced recipes continue with fallback recipes.
+ * Datapack reloads can fire another recipe event after JEI has started; if that event provides
+ * synced recipes, JEI restarts using the synced recipes.
+ *
+ * Once those events have arrived, JEI additionally waits for the world to finish loading before
+ * starting, so that background loading never races against a half-built client level.
  */
-public class StartEventObserver {
+public class StartEventObserver implements ResourceManagerReloadListener {
 	private static final Logger LOGGER = LogManager.getLogger();
-	private static final Set<Class<? extends Event>> requiredEvents = Set.of(TagsUpdatedEvent.class, RecipesUpdatedEvent.class);
 
 	private enum State {
-		DISABLED, ENABLED, EVENTS_RECEIVED, JEI_STARTED
+		LISTENING, WAITING_FOR_WORLD, JEI_STARTED
 	}
 
-	private final Set<Class<? extends Event>> observedEvents = new HashSet<>();
+	private final IConnectionToServer serverConnection;
 	private final Runnable startRunnable;
 	private final Runnable stopRunnable;
-	private State state = State.DISABLED;
-	private boolean worldLoaded = false;
+	private WeakReference<Connection> currentConnection = new WeakReference<>(null);
+	private State state = State.LISTENING;
+	private boolean observedLogin;
+	private boolean observedRecipeSync;
 
-	public StartEventObserver(Runnable startRunnable, Runnable stopRunnable) {
+	public StartEventObserver(IConnectionToServer serverConnection, Runnable startRunnable, Runnable stopRunnable) {
+		this.serverConnection = serverConnection;
 		this.startRunnable = startRunnable;
 		this.stopRunnable = stopRunnable;
 	}
 
 	public void register(PermanentEventSubscriptions subscriptions) {
-		requiredEvents
-			.forEach(eventClass -> subscriptions.register(eventClass, this::onEvent));
-
-		subscriptions.register(ClientPlayerNetworkEvent.LoggingIn.class, event -> {
-			LOGGER.info("JEI StartEventObserver received {}", event.getClass());
-			if (this.state == State.DISABLED) {
-				transitionState(State.ENABLED);
-			}
-		});
+		subscriptions.register(EventPriority.LOWEST, ClientPlayerNetworkEvent.LoggingIn.class, this::onLoggingIn);
+		subscriptions.register(EventPriority.LOWEST, RecipesUpdatedEvent.class, this::onRecipesUpdatedEvent);
 
 		subscriptions.register(ClientPlayerNetworkEvent.LoggingOut.class, event -> {
 			if (event.getPlayer() != null) {
-				LOGGER.info("JEI StartEventObserver received {}", event.getClass());
-				transitionState(State.DISABLED);
+				logReceivedEvent(event);
+				Internal.clearClientRecipes();
+				transitionState(State.LISTENING);
 			}
 		});
 
-		// Listen for client ticks to detect when the world is fully loaded
 		subscriptions.register(TickEvent.ClientTickEvent.class, event -> {
-			if (event.phase == TickEvent.Phase.START && this.state == State.EVENTS_RECEIVED) {
-				Minecraft minecraft = Minecraft.getInstance();
-				if (minecraft.level != null && minecraft.player != null) {
-					// World is loaded and player is ready
-					worldLoaded = true;
-					LOGGER.info("JEI StartEventObserver: World is fully loaded");
-					transitionState(State.JEI_STARTED);
-				}
+			if (event.phase != TickEvent.Phase.START) {
+				return;
+			}
+			Minecraft minecraft = Minecraft.getInstance();
+			if (this.state == State.WAITING_FOR_WORLD && isWorldLoaded()) {
+				LOGGER.info("JEI StartEventObserver: World is fully loaded");
+				transitionState(State.JEI_STARTED);
+			} else if (this.state != State.LISTENING && minecraft.level == null) {
+				// The world went away while JEI was starting or already loading.
+				LOGGER.info("JEI detected world unload during startup");
+				transitionState(State.LISTENING);
 			}
 		});
 
@@ -93,116 +97,158 @@ public class StartEventObserver {
 			if (this.state != State.JEI_STARTED) {
 				Screen screen = event.getScreen();
 				Minecraft minecraft = screen.getMinecraft();
-				if (screen instanceof AbstractContainerScreen && minecraft.player != null) {
+				if (screen instanceof AbstractContainerScreen && minecraft != null && minecraft.player != null) {
 					LOGGER.error("""
 							A Screen is opening but JEI hasn't started yet.
-							Normally, JEI is started after ClientPlayerNetworkEvent.LoggedInEvent, TagsUpdatedEvent, and RecipesUpdatedEvent.
-							Something has caused one or more of these events to fail, so JEI is starting very late.""");
-					transitionState(State.DISABLED);
-					transitionState(State.ENABLED);
+							Normally, JEI is started after these events have fired: {}.
+							Something has caused one or more of these events to fail, so JEI is starting very late.
+							Missing events: {}""",
+						getRequiredStartEventsString(),
+						getMissingStartEventsString()
+					);
+					transitionState(State.LISTENING);
+					transitionState(State.WAITING_FOR_WORLD);
 					transitionState(State.JEI_STARTED);
-				}
-			}
-		});
-
-		subscriptions.register(TickEvent.ClientTickEvent.class, event -> {
-			if (event.phase == TickEvent.Phase.START) {
-				Minecraft minecraft = Minecraft.getInstance();
-				// Check if world was unloaded while JEI was starting or loading
-				if ((this.state == State.EVENTS_RECEIVED || this.state == State.JEI_STARTED) && minecraft.level == null) {
-					LOGGER.info("JEI detected world unload during startup");
-					transitionState(State.DISABLED);
 				}
 			}
 		});
 	}
 
-	/**
-	 * Observe an event and start JEI if we have observed all the required events.
-	 * JEI will wait for the world to finish loading before completing initialization.
-	 */
-	private <T extends Event> void onEvent(T event) {
-		if (this.state == State.DISABLED) {
+	private void onLoggingIn(ClientPlayerNetworkEvent.LoggingIn event) {
+		if (!observeConnectionEvent(event)) {
 			return;
 		}
-		LOGGER.info("JEI StartEventObserver received {}", event.getClass());
-		Class<? extends Event> eventClass = event.getClass();
-		if (requiredEvents.contains(eventClass) &&
-			observedEvents.add(eventClass) &&
-			observedEvents.containsAll(requiredEvents)
-		) {
-			if (this.state == State.JEI_STARTED) {
-				restart();
-			} else {
-				// All required events received, but wait for world load
-				transitionState(State.EVENTS_RECEIVED);
-				LOGGER.info("JEI StartEventObserver: All required events received, waiting for world load...");
+		this.observedLogin = true;
+		startIfReady();
+	}
 
-				// Check if world is already loaded (edge case)
-				Minecraft minecraft = Minecraft.getInstance();
-				if (minecraft.level != null && minecraft.player != null) {
-					worldLoaded = true;
-					transitionState(State.JEI_STARTED);
-				}
-			}
+	private void onRecipesUpdatedEvent(RecipesUpdatedEvent event) {
+		if (!observeConnectionEvent(event)) {
+			return;
 		}
+		this.observedRecipeSync = true;
+		if (this.state == State.JEI_STARTED && Internal.hasClientSyncedRecipes()) {
+			restart();
+		} else {
+			startIfReady();
+		}
+	}
+
+	private void startIfReady() {
+		if (this.state != State.LISTENING || !this.observedLogin) {
+			return;
+		}
+		if (shouldWaitForRecipes() && !this.observedRecipeSync) {
+			return;
+		}
+		transitionState(State.WAITING_FOR_WORLD);
+		LOGGER.info("JEI StartEventObserver: All required events received, waiting for world load...");
+
+		// The world may already be loaded by the time the events arrive; don't wait for a tick then.
+		if (isWorldLoaded()) {
+			transitionState(State.JEI_STARTED);
+		}
+	}
+
+	private static boolean isWorldLoaded() {
+		Minecraft minecraft = Minecraft.getInstance();
+		return minecraft.level != null && minecraft.player != null;
+	}
+
+	private <T extends Event> boolean observeConnectionEvent(T event) {
+		Connection observingConnection = this.currentConnection.get();
+		Connection currentConnection = getCurrentConnection();
+		if (currentConnection != observingConnection) {
+			clearObservedStartEvents();
+			this.currentConnection = new WeakReference<>(currentConnection);
+		}
+		if (currentConnection == null) {
+			LOGGER.debug("JEI StartEventObserver received {} too early, ignoring", event.getClass());
+			return false;
+		}
+		logReceivedEvent(event);
+		return true;
+	}
+
+	private boolean shouldWaitForRecipes() {
+		return serverConnection.isJeiOnServer() ||
+			serverConnection.isSameModLoader();
+	}
+
+	private String getRequiredStartEventsString() {
+		if (shouldWaitForRecipes()) {
+			return "[%s, %s]".formatted(ClientPlayerNetworkEvent.LoggingIn.class.getName(), RecipesUpdatedEvent.class.getName());
+		}
+		return "[%s]".formatted(ClientPlayerNetworkEvent.LoggingIn.class.getName());
+	}
+
+	private String getMissingStartEventsString() {
+		StringBuilder missingEvents = new StringBuilder("[");
+		if (!observedLogin) {
+			missingEvents.append(ClientPlayerNetworkEvent.LoggingIn.class.getName());
+		}
+		if (shouldWaitForRecipes() && !observedRecipeSync) {
+			if (missingEvents.length() > 1) {
+				missingEvents.append(", ");
+			}
+			missingEvents.append(RecipesUpdatedEvent.class.getName());
+		}
+		return missingEvents.append("]").toString();
+	}
+
+	private static <T extends Event> void logReceivedEvent(T event) {
+		LOGGER.debug("JEI StartEventObserver received event: {}", event.getClass());
+	}
+
+	@Nullable
+	private static Connection getCurrentConnection() {
+		Minecraft minecraft = Minecraft.getInstance();
+		ClientPacketListener packetListener = minecraft.getConnection();
+		if (packetListener != null) {
+			return packetListener.getConnection();
+		} else {
+			return null;
+		}
+	}
+
+	@Override
+	public void onResourceManagerReload(ResourceManager resourceManager) {
+		LOGGER.debug("JEI StartEventObserver detected resource manager reload.");
+		restart();
 	}
 
 	private void restart() {
 		if (this.state != State.JEI_STARTED) {
 			return;
 		}
-		transitionState(State.DISABLED);
-		transitionState(State.ENABLED);
+		transitionState(State.LISTENING);
+		transitionState(State.WAITING_FOR_WORLD);
 		transitionState(State.JEI_STARTED);
 	}
 
 	private void transitionState(State newState) {
-		LOGGER.info("JEI StartEventObserver transitioning state from " + this.state + " to " + newState);
+		LOGGER.debug("JEI StartEventObserver transitioning state from {} to {}", this.state, newState);
 
 		switch (newState) {
-			case DISABLED -> {
+			case LISTENING -> {
 				if (this.state == State.JEI_STARTED) {
 					this.stopRunnable.run();
 				}
-				this.worldLoaded = false;
 			}
-			case ENABLED -> {
-				if (this.state != State.DISABLED) {
+			case WAITING_FOR_WORLD -> {
+				if (this.state != State.LISTENING) {
 					throw new IllegalStateException("Attempted Illegal state transition from " + this.state + " to " + newState);
 				}
-				// Force ProjectE IEMCProxy to load on the main thread before JEI starts loading
+				// These mods initialize static state from class init that is not safe to trigger
+				// from JEI's background loading threads, so force them onto the main thread first.
 				forceProjectEClassLoad();
-				// Force Mekanism ISecurityUtils to load on the main thread before JEI starts loading
 				forceMekanismClassLoad();
-				// Force JER Compatibility to load on the main thread before JEI starts loading
-				forceJERClassLoad();
-			}
-			case EVENTS_RECEIVED -> {
-				if (this.state != State.ENABLED) {
-					throw new IllegalStateException("Attempted Illegal state transition from " + this.state + " to " + newState);
-				}
-				// Force ProjectE IEMCProxy to load on the main thread before JEI starts loading
-				forceProjectEClassLoad();
-				// Force Mekanism ISecurityUtils to load on the main thread before JEI starts loading
-				forceMekanismClassLoad();
-				// Force JER Compatibility to load on the main thread before JEI starts loading
 				forceJERClassLoad();
 			}
 			case JEI_STARTED -> {
-				if (this.state != State.ENABLED && this.state != State.EVENTS_RECEIVED) {
+				if (this.state != State.WAITING_FOR_WORLD) {
 					throw new IllegalStateException("Attempted Illegal state transition from " + this.state + " to " + newState);
 				}
-				if (this.state == State.EVENTS_RECEIVED && !worldLoaded) {
-					// Not ready yet, wait for client tick
-					return;
-				}
-				// Force ProjectE IEMCProxy to load on the main thread before JEI starts loading
-				forceProjectEClassLoad();
-				// Force Mekanism ISecurityUtils to load on the main thread before JEI starts loading
-				forceMekanismClassLoad();
-				// Force JER Compatibility to load on the main thread before JEI starts loading
-				forceJERClassLoad();
 				// Start JEI in background - this is non-blocking now
 				this.startRunnable.run();
 				LOGGER.info("JEI startup initiated in background. The world is running.");
@@ -210,7 +256,12 @@ public class StartEventObserver {
 		}
 
 		this.state = newState;
-		this.observedEvents.clear();
+		clearObservedStartEvents();
+	}
+
+	private void clearObservedStartEvents() {
+		this.observedLogin = false;
+		this.observedRecipeSync = false;
 	}
 
 	private void forceMekanismClassLoad() {
@@ -219,7 +270,7 @@ public class StartEventObserver {
 			mekaProxyClass.getField("INSTANCE");
 			LOGGER.info("Mekanism ISecurityUtils loaded successfully");
 		} catch (ClassNotFoundException e) {
-			LOGGER.info("Mekanism ISecurityUtils not found (ProjectE may not be installed)");
+			LOGGER.info("Mekanism ISecurityUtils not found (Mekanism may not be installed)");
 		} catch (Throwable e) {
 			LOGGER.info("Mekanism ISecurityUtils load error: " + e.getClass().getSimpleName() + ": " + e.getMessage());
 		}

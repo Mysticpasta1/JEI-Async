@@ -9,6 +9,7 @@ import mezz.jei.api.runtime.IIngredientManager;
 import mezz.jei.api.runtime.IIngredientVisibility;
 import mezz.jei.common.config.IClientToggleState;
 import mezz.jei.common.config.IClientConfig;
+import mezz.jei.core.search.BakedSubstringIndexBuilder;
 import mezz.jei.gui.filter.FilterTextSource;
 import mezz.jei.gui.filter.IFilterTextSource;
 import mezz.jei.gui.ingredients.IListElementInfo;
@@ -89,13 +90,14 @@ public class IngredientFilterTest {
 			clientConfig,
 			ingredientFilterConfig,
 			ingredientManager,
-			Comparator.comparingInt(Object::hashCode),
+			ingredients -> Comparator.comparingInt(Object::hashCode),
 			baseList,
 			modIdHelper,
 			ingredientVisibility,
 			colorHelper,
+			BakedSubstringIndexBuilder::new,
 			toggleState,
-				null
+			null
 		);
 
 		this.ingredientManager.registerIngredientListener(blacklist);

@@ -7,19 +7,22 @@ import mezz.jei.api.ingredients.IIngredientType;
 import mezz.jei.api.ingredients.ITypedIngredient;
 import mezz.jei.api.runtime.IIngredientManager;
 import mezz.jei.api.runtime.IIngredientVisibility;
+import mezz.jei.api.search.ISearchStorageBuilderFactory;
 import mezz.jei.common.config.DebugConfig;
 import mezz.jei.common.config.IClientConfig;
 import mezz.jei.common.config.IClientToggleState;
 import mezz.jei.common.config.IIngredientFilterConfig;
 import mezz.jei.gui.filter.IFilterTextSource;
 import mezz.jei.gui.overlay.elements.IElement;
-import mezz.jei.gui.overlay.IIngredientGridSource;
+import mezz.jei.gui.overlay.ingredients.IIngredientGridSource;
 import mezz.jei.gui.overlay.elements.IngredientElement;
 import mezz.jei.gui.search.ElementPrefixParser;
 import mezz.jei.gui.search.ElementSearch;
 import mezz.jei.gui.search.ElementSearchLowMem;
 import mezz.jei.gui.search.IElementSearch;
 import mezz.jei.gui.search.SearchStringCache;
+import mezz.jei.gui.search.SearchTokenizer;
+import mezz.jei.gui.search.Token;
 import net.minecraft.client.Minecraft;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -36,8 +39,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.function.Function;
 import java.util.stream.Stream;
 
 public class IngredientFilter implements
@@ -47,15 +49,15 @@ public class IngredientFilter implements
 		IClientToggleState.IEditModeListener,
 		AutoCloseable {
 	private static final Logger LOGGER = LogManager.getLogger();
-	private static final Pattern QUOTE_PATTERN = Pattern.compile("\"");
-	private static final Pattern FILTER_SPLIT_PATTERN = Pattern.compile("(-?\".*?(?:\"|$)|\\S+)");
+	private final SearchTokenizer searchTokenizer = new SearchTokenizer();
 
 	private final IClientConfig clientConfig;
 	private final IFilterTextSource filterTextSource;
 	private final IIngredientManager ingredientManager;
-	private final Comparator<IListElement<?>> ingredientComparator;
+	private Comparator<IListElement<?>> ingredientComparator;
 	private final IModIdHelper modIdHelper;
 	private final IIngredientVisibility ingredientVisibility;
+	private final Function<List<IListElementInfo<?>>, Comparator<IListElement<?>>> sortIndexUpdater;
 
 	private final ElementPrefixParser elementPrefixParser;
 	private IElementSearch elementSearch;
@@ -65,48 +67,40 @@ public class IngredientFilter implements
 	private final List<SourceListChangedListener> listeners = new ArrayList<>();
 	private final List<CompletableFuture<?>> tasks = Collections.synchronizedList(new ArrayList<>());
 	private volatile boolean closed = false;
+	private boolean searchIndexDirty;
+	private boolean sortIndexesDirty;
 
 	public IngredientFilter(
-			IFilterTextSource filterTextSource,
-			IClientConfig clientConfig,
-			IIngredientFilterConfig config,
-			IIngredientManager ingredientManager,
-			Comparator<IListElement<?>> ingredientComparator,
-			List<IListElementInfo<?>> ingredients,
-			IModIdHelper modIdHelper,
-			IIngredientVisibility ingredientVisibility,
-			IColorHelper colorHelper,
-			IClientToggleState clientToggleState,
-			@Nullable SearchStringCache searchStringCache
+		IFilterTextSource filterTextSource,
+		IClientConfig clientConfig,
+		IIngredientFilterConfig config,
+		IIngredientManager ingredientManager,
+		Function<List<IListElementInfo<?>>, Comparator<IListElement<?>>> sortIndexUpdater,
+		List<IListElementInfo<?>> ingredients,
+		IModIdHelper modIdHelper,
+		IIngredientVisibility ingredientVisibility,
+		IColorHelper colorHelper,
+		ISearchStorageBuilderFactory searchStorageBuilderFactory,
+		IClientToggleState clientToggleState,
+		@Nullable SearchStringCache searchStringCache
 	) {
 		this.filterTextSource = filterTextSource;
 		this.clientConfig = clientConfig;
 		this.ingredientManager = ingredientManager;
-		this.ingredientComparator = ingredientComparator;
+		this.sortIndexUpdater = sortIndexUpdater;
+		this.ingredientComparator = sortIndexUpdater.apply(ingredients);
 		this.modIdHelper = modIdHelper;
 		this.ingredientVisibility = ingredientVisibility;
-		this.elementPrefixParser = new ElementPrefixParser(ingredientManager, config, colorHelper);
+		this.elementPrefixParser = new ElementPrefixParser(ingredientManager, config, colorHelper, modIdHelper, searchStorageBuilderFactory);
 
-		this.elementSearch = createElementSearch(clientConfig, elementPrefixParser);
+		this.elementSearch = createElementSearch(clientConfig, elementPrefixParser, ingredients, ingredientManager, searchStringCache);
+		addConfigListeners(clientConfig, config);
 
 		LOGGER.info("Adding {} ingredients", ingredients.size());
 		for (IListElementInfo<?> ingredient : ingredients) {
 			updateHiddenState(ingredient.getElement());
 		}
-		if (this.elementSearch instanceof ElementSearch elementSearchImpl) {
-			if (searchStringCache != null) {
-				// Collect whatever we end up deriving, so the next launch can skip it.
-				searchStringCache.startCollecting();
-			}
-			elementSearchImpl.addAll(ingredients, ingredientManager, searchStringCache);
-		} else {
-			// The low-memory search does not use the cache; drop it rather than holding every
-			// cached search string for the rest of the session.
-			if (searchStringCache != null) {
-				searchStringCache.release();
-			}
-			this.elementSearch.addAll(ingredients, ingredientManager);
-		}
+		invalidateCache();
 		LOGGER.info("Added {} ingredients", ingredients.size());
 		if (DebugConfig.isLogSuffixTreeStatsEnabled()) {
 			this.elementSearch.logStatistics();
@@ -144,11 +138,41 @@ public class IngredientFilter implements
 		this.ingredientListCached = null;
 	}
 
-	private static IElementSearch createElementSearch(IClientConfig clientConfig, ElementPrefixParser elementPrefixParser) {
+	private void addConfigListeners(IClientConfig clientConfig, IIngredientFilterConfig config) {
+		clientConfig.addLowMemorySlowSearchEnabledListener(v -> markSearchIndexDirty());
+		clientConfig.addIngredientSorterStagesListener(v -> markSortIndexesDirty());
+		config.addSearchConfigListener(this::markSearchIndexDirty);
+	}
+
+	private static IElementSearch createElementSearch(
+		IClientConfig clientConfig,
+		ElementPrefixParser elementPrefixParser,
+		List<IListElementInfo<?>> elementInfos,
+		IIngredientManager ingredientManager
+	) {
+		return createElementSearch(clientConfig, elementPrefixParser, elementInfos, ingredientManager, null);
+	}
+
+	private static IElementSearch createElementSearch(
+		IClientConfig clientConfig,
+		ElementPrefixParser elementPrefixParser,
+		List<IListElementInfo<?>> elementInfos,
+		IIngredientManager ingredientManager,
+		@Nullable SearchStringCache searchStringCache
+	) {
 		if (clientConfig.isLowMemorySlowSearchEnabled()) {
-			return new ElementSearchLowMem();
+			// The low-memory search does not use the cache; drop it rather than holding every
+			// cached search string for the rest of the session.
+			if (searchStringCache != null) {
+				searchStringCache.release();
+			}
+			return new ElementSearchLowMem(elementPrefixParser.getNoPrefix(), elementInfos);
 		} else {
-			return new ElementSearch(elementPrefixParser);
+			if (searchStringCache != null) {
+				// Collect whatever we end up deriving, so the next launch can skip it.
+				searchStringCache.startCollecting();
+			}
+			return new ElementSearch(elementPrefixParser, elementInfos, ingredientManager, searchStringCache);
 		}
 	}
 
@@ -171,8 +195,12 @@ public class IngredientFilter implements
 		});
 
 		if (closed) return;
-		// Add to search tree in bulk
-		this.elementSearch.addAll(ingredients, ingredientManager);
+		// Add to the search index. This appends to the mutable side of the already-built
+		// storage; a full rebuild only happens via rebuildItemFilter().
+		for (IListElementInfo<?> info : ingredients) {
+			if (closed) return;
+			this.elementSearch.add(info, ingredientManager);
+		}
 
 		invalidateCache();
 	}
@@ -184,9 +212,34 @@ public class IngredientFilter implements
 	public void rebuildItemFilter() {
 		this.invalidateCache();
 		Collection<IListElement<?>> ingredients = this.elementSearch.getAllIngredients();
-		this.elementSearch = createElementSearch(this.clientConfig, this.elementPrefixParser);
 		List<IListElementInfo<?>> elementInfos = IngredientListElementFactory.rebuildList(ingredientManager, ingredients, modIdHelper);
-		addIngredients(elementInfos);
+		this.ingredientComparator = this.sortIndexUpdater.apply(elementInfos);
+		this.elementSearch = createElementSearch(this.clientConfig, this.elementPrefixParser, elementInfos, ingredientManager);
+		this.searchIndexDirty = false;
+		this.sortIndexesDirty = false;
+	}
+
+	private void markSearchIndexDirty() {
+		this.searchIndexDirty = true;
+		notifyListenersOfChange();
+	}
+
+	private void markSortIndexesDirty() {
+		this.sortIndexesDirty = true;
+		notifyListenersOfChange();
+	}
+
+	private void updateDirtyState() {
+		if (searchIndexDirty) {
+			rebuildItemFilter();
+		}
+		if (sortIndexesDirty) {
+			Collection<IListElement<?>> ingredients = this.elementSearch.getAllIngredients();
+			List<IListElementInfo<?>> elementInfos = IngredientListElementFactory.rebuildList(ingredientManager, ingredients, modIdHelper);
+			this.ingredientComparator = this.sortIndexUpdater.apply(elementInfos);
+			this.sortIndexesDirty = false;
+			invalidateCache();
+		}
 	}
 
 	@Override
@@ -253,6 +306,7 @@ public class IngredientFilter implements
 
 	@Override
 	public List<IElement<?>> getElements() {
+		updateDirtyState();
 		String filterText = this.filterTextSource.getFilterText();
 		filterText = filterText.toLowerCase();
 		List<IElement<?>> cached = ingredientListCached;
@@ -315,17 +369,18 @@ public class IngredientFilter implements
 	@Override
 	public <V> void onIngredientsAdded(IIngredientHelper<V> ingredientHelper, Collection<ITypedIngredient<V>> ingredients) {
 		for (ITypedIngredient<V> value : ingredients) {
-			Optional<IListElement<V>> matchingElement = this.elementSearch.findElement(value, ingredientHelper);
-			if (matchingElement.isPresent()) {
-				updateHiddenState(matchingElement.get());
-				if (DebugConfig.isDebugModeEnabled()) {
+			Optional<IListElement<V>> matchingElementOptional = this.elementSearch.findElement(value, ingredientHelper);
+			if (matchingElementOptional.isPresent()) {
+				IListElement<V> matchingElement = matchingElementOptional.get();
+				updateHiddenState(matchingElement);
+				if (DebugConfig.isDebugIngredientsEnabled()) {
 					LOGGER.debug("Updated ingredient: {}", ingredientHelper.getErrorInfo(value.getIngredient()));
 				}
 			} else {
 				IListElementInfo<V> listElementInfo = ListElementInfo.create(value, this.ingredientManager, modIdHelper);
 				if (listElementInfo != null) {
 					addIngredient(listElementInfo);
-					if (DebugConfig.isDebugModeEnabled()) {
+					if (DebugConfig.isDebugIngredientsEnabled()) {
 						LOGGER.debug("Added ingredient: {}", ingredientHelper.getErrorInfo(value.getIngredient()));
 					}
 				}
@@ -352,25 +407,20 @@ public class IngredientFilter implements
 		if (filterText.isEmpty()) {
 			return searchTokens;
 		}
-		Matcher filterMatcher = FILTER_SPLIT_PATTERN.matcher(filterText);
-		while (filterMatcher.find()) {
-			String string = filterMatcher.group(1);
-			final boolean remove = string.startsWith("-");
-			if (remove) {
-				string = string.substring(1);
-			}
-			string = QUOTE_PATTERN.matcher(string).replaceAll("");
-			if (string.isEmpty()) {
+
+		List<Token> tokens = searchTokenizer.tokenize(filterText);
+		for (Token token : tokens) {
+			if (token.isEmpty()) {
 				continue;
 			}
-			this.elementPrefixParser.parseToken(string)
-					.ifPresent(result -> {
-						if (remove) {
-							searchTokens.toRemove.add(result);
-						} else {
-							searchTokens.toSearch.add(result);
-						}
-					});
+			this.elementPrefixParser.parseToken(token.text())
+				.ifPresent(result -> {
+					if (token.exclusion()) {
+						searchTokens.toRemove.add(result);
+					} else {
+						searchTokens.toSearch.add(result);
+					}
+				});
 		}
 		return searchTokens;
 	}

@@ -1,8 +1,7 @@
 package mezz.jei.gui.recipes.layouts;
 
 import mezz.jei.common.config.RecipeSorterStage;
-import mezz.jei.gui.recipes.RecipeLayoutWithButtons;
-import net.minecraft.world.entity.player.Player;
+import mezz.jei.gui.recipes.IRecipeLayoutWithButtons;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import org.jetbrains.annotations.Nullable;
 
@@ -13,22 +12,20 @@ import java.util.Set;
 public interface IRecipeLayoutList {
 	static IRecipeLayoutList create(
 		Set<RecipeSorterStage> recipeSorterStages,
-		@Nullable AbstractContainerMenu container,
-		@Nullable Player player,
-		List<? extends RecipeLayoutWithButtons<?>> unsortedList
+		List<? extends IRecipeLayoutWithButtons<?>> unsortedList
 	) {
 		if (recipeSorterStages.isEmpty()) {
 			return new UnsortedRecipeLayoutList(unsortedList);
 		} else {
-			return new LazySortedRecipeLayoutList(recipeSorterStages, container, player, unsortedList);
+			return new LazySortedRecipeLayoutList(recipeSorterStages, unsortedList);
 		}
 	}
 
 	int size();
 
-	List<RecipeLayoutWithButtons<?>> subList(int from, int to);
+	List<IRecipeLayoutWithButtons<?>> subList(int from, int to, @Nullable AbstractContainerMenu container);
 
-	Optional<RecipeLayoutWithButtons<?>> findFirst();
+	Optional<IRecipeLayoutWithButtons<?>> findFirst(@Nullable AbstractContainerMenu container);
 
-	void tick();
+	void tick(@Nullable AbstractContainerMenu container);
 }

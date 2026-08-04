@@ -36,7 +36,7 @@ public interface IRecipeGuiLogic {
 
 	void nextPage();
 
-	void tick();
+	void tick(@Nullable AbstractContainerMenu container);
 
 	boolean showFocus(IFocusGroup focuses);
 
@@ -58,7 +58,7 @@ public interface IRecipeGuiLogic {
 	Stream<ITypedIngredient<?>> getRecipeCatalysts();
 	Stream<ITypedIngredient<?>> getRecipeCatalysts(IRecipeCategory<?> recipeCategory);
 
-	List<RecipeLayoutWithButtons<?>> getVisibleRecipeLayoutsWithButtons(
+	List<IRecipeLayoutWithButtons<?>> getVisibleRecipeLayoutsWithButtons(
 		int availableHeight,
 		int minRecipePadding,
 		@Nullable AbstractContainerMenu container

@@ -19,7 +19,11 @@ public interface IIngredientFilterConfig {
 
 	boolean getSearchModIds();
 
+	boolean getSearchModAliases();
+
 	boolean getSearchIngredientAliases();
 
 	boolean getSearchShortModNames();
+
+	void addSearchConfigListener(Runnable listener);
 }

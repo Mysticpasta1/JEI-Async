@@ -138,6 +138,9 @@ public class RecipesGui extends Screen implements IRecipesGui, IRecipeFocusSourc
 		this.focusFactory = focusFactory;
 		this.minecraft = Minecraft.getInstance();
 		this.layouts = new RecipeGuiLayouts();
+		IClientConfig clientConfig = Internal.getJeiClientConfigs().getClientConfig();
+		clientConfig.addCenterSearchBarEnabledListener(v -> reopenIfOpen());
+		clientConfig.addMaxRecipeGuiHeightListener(v -> reopenIfOpen());
 
 		Textures textures = Internal.getTextures();
 		IDrawableStatic arrowNext = textures.getArrowNext();
@@ -184,19 +187,14 @@ public class RecipesGui extends Screen implements IRecipesGui, IRecipeFocusSourc
 		super.init();
 
 		final int xSize = minGuiWidth;
-		int ySize;
 		IClientConfig clientConfig = Internal.getJeiClientConfigs().getClientConfig();
-		if (clientConfig.isCenterSearchBarEnabled()) {
-			ySize = this.height - 76;
-		} else {
-			ySize = this.height - 58;
-		}
-		int extraSpace = 0;
-		final int maxHeight = clientConfig.getMaxRecipeGuiHeight();
-		if (ySize > maxHeight) {
-			extraSpace = ySize - maxHeight;
-			ySize = maxHeight;
-		}
+		RecipeGuiSizing.Size recipeGuiSize = RecipeGuiSizing.calculateInitialSize(
+			this.height,
+			clientConfig.isCenterSearchBarEnabled(),
+			clientConfig.getMaxRecipeGuiHeight()
+		);
+		int ySize = recipeGuiSize.ySize();
+		int extraSpace = recipeGuiSize.extraSpace();
 
 		final int guiLeft = (this.width - xSize) / 2;
 		final int guiTop = RecipeGuiTab.TAB_HEIGHT + 21 + (extraSpace / 2);
@@ -231,6 +229,8 @@ public class RecipesGui extends Screen implements IRecipesGui, IRecipeFocusSourc
 		if (minecraft == null) {
 			return;
 		}
+		super.render(guiGraphics, mouseX, mouseY, partialTicks);
+
 		renderBackground(guiGraphics);
 		RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
 		this.background.draw(guiGraphics, area);
@@ -278,7 +278,6 @@ public class RecipesGui extends Screen implements IRecipesGui, IRecipeFocusSourc
 		RenderSystem.disableBlend();
 
 		hoveredRecipeLayout.ifPresent(l -> l.drawOverlays(guiGraphics, mouseX, mouseY));
-		hoveredRecipeCatalyst.ifPresent(h -> h.drawHoverOverlays(guiGraphics));
 
 		hoveredRecipeCatalyst.ifPresent(h -> {
 			JeiTooltip tooltip = new JeiTooltip();
@@ -356,7 +355,7 @@ public class RecipesGui extends Screen implements IRecipesGui, IRecipeFocusSourc
 
 		this.optionButtons.tick();
 
-		this.logic.tick();
+		this.logic.tick(container);
 	}
 
 	@Override
@@ -442,6 +441,15 @@ public class RecipesGui extends Screen implements IRecipesGui, IRecipeFocusSourc
 		return minecraft != null && minecraft.screen == this;
 	}
 
+	private void reopenIfOpen() {
+		if (isOpen() && minecraft != null) {
+			Screen currentParentScreen = parentScreen;
+			minecraft.setScreen(currentParentScreen);
+			parentScreen = currentParentScreen;
+			open();
+		}
+	}
+
 	private void open() {
 		if (minecraft != null) {
 			if (!isOpen()) {
@@ -502,6 +510,13 @@ public class RecipesGui extends Screen implements IRecipesGui, IRecipeFocusSourc
 			.findFirst();
 	}
 
+	public Optional<IRecipeLayoutWithButtons<?>> getRecipeLayoutUnderMouse(double mouseX, double mouseY) {
+		if (!isOpen()) {
+			return Optional.empty();
+		}
+		return layouts.getRecipeLayoutUnderMouse(mouseX, mouseY);
+	}
+
 	public void back() {
 		logic.back();
 	}
@@ -521,7 +536,7 @@ public class RecipesGui extends Screen implements IRecipesGui, IRecipeFocusSourc
 		final int availableHeight = recipeLayoutsArea.getHeight();
 
 		AbstractContainerMenu containerMenu = getParentContainerMenu();
-		List<RecipeLayoutWithButtons<?>> recipeLayoutsWithButtons = logic.getVisibleRecipeLayoutsWithButtons(availableHeight, minRecipePadding, containerMenu);
+		List<IRecipeLayoutWithButtons<?>> recipeLayoutsWithButtons = logic.getVisibleRecipeLayoutsWithButtons(availableHeight, minRecipePadding, containerMenu);
 		int recipesPerPage = this.logic.getRecipesPerPage();
 
 		this.layouts.setRecipeLayoutsWithButtons(recipeLayoutsWithButtons);
@@ -552,7 +567,7 @@ public class RecipesGui extends Screen implements IRecipesGui, IRecipeFocusSourc
 		);
 	}
 
-	private <T> RecipeLayoutWithButtons<T> createRecipeLayoutWithButtons(IRecipeLayoutDrawable<T> recipeLayoutDrawable) {
+	private <T> IRecipeLayoutWithButtons<T> createRecipeLayoutWithButtons(IRecipeLayoutDrawable<T> recipeLayoutDrawable) {
 		RecipeTransferButton transferButton = RecipeTransferButton.create(
 			recipeLayoutDrawable,
 			this::onClose
@@ -664,12 +679,22 @@ public class RecipesGui extends Screen implements IRecipesGui, IRecipeFocusSourc
 		@Override
 		public Optional<IUserInputHandler> handleMouseScrolled(double mouseX, double mouseY, double scrollDelta) {
 			if (recipesGui.isMouseOver(mouseX, mouseY)) {
-				if (scrollDelta < 0) {
-					recipesGui.logic.nextPage();
-					return Optional.of(this);
-				} else if (scrollDelta > 0) {
-					recipesGui.logic.previousPage();
-					return Optional.of(this);
+				if (hasShiftDown()) {
+					if (scrollDelta < 0) {
+						recipesGui.logic.nextRecipeCategory();
+						return Optional.of(this);
+					} else if (scrollDelta > 0) {
+						recipesGui.logic.previousRecipeCategory();
+						return Optional.of(this);
+					}
+				} else {
+					if (scrollDelta < 0) {
+						recipesGui.logic.nextPage();
+						return Optional.of(this);
+					} else if (scrollDelta > 0) {
+						recipesGui.logic.previousPage();
+						return Optional.of(this);
+					}
 				}
 			}
 

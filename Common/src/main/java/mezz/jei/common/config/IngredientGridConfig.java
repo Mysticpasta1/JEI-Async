@@ -1,12 +1,11 @@
 package mezz.jei.common.config;
 
+import mezz.jei.common.config.file.ConfigValue;
 import mezz.jei.common.util.HorizontalAlignment;
 import mezz.jei.common.util.NavigationVisibility;
 import mezz.jei.common.util.VerticalAlignment;
 import mezz.jei.common.config.file.IConfigCategoryBuilder;
 import mezz.jei.common.config.file.IConfigSchemaBuilder;
-
-import java.util.function.Supplier;
 
 public class IngredientGridConfig implements IIngredientGridConfig {
 	private static final int minNumRows = 1;
@@ -18,15 +17,17 @@ public class IngredientGridConfig implements IIngredientGridConfig {
 	private static final int largestNumColumns = 100;
 
 	private static final VerticalAlignment defaultVerticalAlignment = VerticalAlignment.TOP;
-	private static final NavigationVisibility defaultButtonNavigationVisibility = NavigationVisibility.ENABLED;
+	private static final NavigationVisibility defaultNavigationVisibility = NavigationVisibility.ENABLED;
+	private static final IngredientGridNavigationMode defaultNavigationMode = IngredientGridNavigationMode.PAGED;
 	private static final boolean defaultDrawBackground = false;
 
-	private final Supplier<Integer> maxRows;
-	private final Supplier<Integer> maxColumns;
-	private final Supplier<HorizontalAlignment> horizontalAlignment;
-	private final Supplier<VerticalAlignment> verticalAlignment;
-	private final Supplier<NavigationVisibility> buttonNavigationVisibility;
-	private final Supplier<Boolean> drawBackground;
+	private final ConfigValue<Integer> maxRows;
+	private final ConfigValue<Integer> maxColumns;
+	private final ConfigValue<HorizontalAlignment> horizontalAlignment;
+	private final ConfigValue<VerticalAlignment> verticalAlignment;
+	private final ConfigValue<NavigationVisibility> navigationVisibility;
+	private final ConfigValue<IngredientGridNavigationMode> navigationMode;
+	private final ConfigValue<Boolean> drawBackground;
 
 	public IngredientGridConfig(String categoryName, IConfigSchemaBuilder builder, HorizontalAlignment defaultHorizontalAlignment) {
 		IConfigCategoryBuilder category = builder.addCategory(categoryName);
@@ -54,10 +55,15 @@ public class IngredientGridConfig implements IIngredientGridConfig {
 			defaultVerticalAlignment,
 			"Vertical alignment of the ingredient grid inside the available area."
 		);
-		buttonNavigationVisibility = category.addEnum(
-			"ButtonNavigationVisibility",
-			defaultButtonNavigationVisibility,
-			"Visibility of the top page buttons. Use AUTO_HIDE to only show it when there are multiple pages."
+		navigationVisibility = category.addEnum(
+			"NavigationVisibility",
+			defaultNavigationVisibility,
+			"Visibility of navigation controls like page buttons and scroll bars. Use AUTO_HIDE to only show them when the list overflows."
+		);
+		navigationMode = category.addEnum(
+			"NavigationMode",
+			defaultNavigationMode,
+			"Choose PAGED for page buttons, SCROLLING for a row-stepped scroll bar, or SMOOTH_SCROLLING for a smooth scroll bar."
 		);
 		drawBackground = category.addBoolean(
 			"DrawBackground",
@@ -102,7 +108,23 @@ public class IngredientGridConfig implements IIngredientGridConfig {
 	}
 
 	@Override
-	public NavigationVisibility getButtonNavigationVisibility() {
-		return buttonNavigationVisibility.get();
+	public NavigationVisibility getNavigationVisibility() {
+		return navigationVisibility.get();
+	}
+
+	@Override
+	public IngredientGridNavigationMode getNavigationMode() {
+		return navigationMode.get();
+	}
+
+	@Override
+	public void addLayoutListener(Runnable listener) {
+		maxRows.addListener(v -> listener.run());
+		maxColumns.addListener(v -> listener.run());
+		horizontalAlignment.addListener(v -> listener.run());
+		verticalAlignment.addListener(v -> listener.run());
+		navigationVisibility.addListener(v -> listener.run());
+		navigationMode.addListener(v -> listener.run());
+		drawBackground.addListener(v -> listener.run());
 	}
 }

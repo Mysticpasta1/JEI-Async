@@ -5,12 +5,13 @@ import java.util.function.Consumer;
 import mezz.jei.api.runtime.IJeiKeyMapping;
 import mezz.jei.common.input.IInternalKeyMappings;
 import mezz.jei.common.input.keys.IJeiKeyMappingCategoryBuilder;
+import mezz.jei.common.input.keys.IJeiKeyMappingInternal;
 import mezz.jei.common.input.keys.JeiKeyConflictContext;
 import mezz.jei.common.input.keys.JeiKeyModifier;
 import mezz.jei.common.input.keys.JeiMultiKeyMapping;
 import mezz.jei.common.platform.IPlatformInputHelper;
 import mezz.jei.common.platform.Services;
-import mezz.jei.common.util.Translator;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.KeyMapping;
 import org.lwjgl.glfw.GLFW;
 
@@ -27,6 +28,7 @@ public final class InternalKeyMappings implements IInternalKeyMappings {
 	private final IJeiKeyMapping nextCategory;
 	private final IJeiKeyMapping previousRecipePage;
 	private final IJeiKeyMapping nextRecipePage;
+	private final IJeiKeyMappingInternal pauseRecipeCycling;
 
 	private final IJeiKeyMapping previousPage;
 	private final IJeiKeyMapping nextPage;
@@ -35,6 +37,9 @@ public final class InternalKeyMappings implements IInternalKeyMappings {
 	private final IJeiKeyMapping toggleBookmarkOverlay;
 	private final IJeiKeyMapping transferRecipeBookmark;
 	private final IJeiKeyMapping maxTransferRecipeBookmark;
+	private final IJeiKeyMappingInternal showBookmarkTooltipFeatures;
+	private final IJeiKeyMapping quickMove;
+	private final IJeiKeyMapping shareToChat;
 
 	private final IJeiKeyMapping showRecipe;
 	private final IJeiKeyMapping showUses;
@@ -59,6 +64,13 @@ public final class InternalKeyMappings implements IInternalKeyMappings {
 	private final IJeiKeyMapping rightClick;
 	private final IJeiKeyMapping enterKey;
 
+	private static int getDefaultBookmarkTooltipFeaturesKey() {
+		if (Minecraft.ON_OSX) {
+			return GLFW.GLFW_KEY_LEFT_SUPER;
+		}
+		return GLFW.GLFW_KEY_LEFT_CONTROL;
+	}
+
 	public InternalKeyMappings(Consumer<KeyMapping> registerMethod) {
 		IPlatformInputHelper inputHelper = Services.PLATFORM.getInputHelper();
 
@@ -71,29 +83,21 @@ public final class InternalKeyMappings implements IInternalKeyMappings {
 		IJeiKeyMapping cheatItemStack1;
 		IJeiKeyMapping cheatItemStack2;
 
-		String overlaysCategoryName = Translator.translateToLocal("jei.key.category.overlays");
-		IJeiKeyMappingCategoryBuilder overlay = inputHelper.createKeyMappingCategoryBuilder(overlaysCategoryName);
+		IJeiKeyMappingCategoryBuilder overlay = inputHelper.createKeyMappingCategoryBuilder("jei.key.category.overlays");
 
-		String mouseHoverCategoryName = Translator.translateToLocal("jei.key.category.mouse.hover");
-		IJeiKeyMappingCategoryBuilder mouseHover = inputHelper.createKeyMappingCategoryBuilder(mouseHoverCategoryName);
+		IJeiKeyMappingCategoryBuilder mouseHover = inputHelper.createKeyMappingCategoryBuilder("jei.key.category.mouse.hover");
 
-		String searchCategoryName = Translator.translateToLocal("jei.key.category.search");
-		IJeiKeyMappingCategoryBuilder search = inputHelper.createKeyMappingCategoryBuilder(searchCategoryName);
+		IJeiKeyMappingCategoryBuilder search = inputHelper.createKeyMappingCategoryBuilder("jei.key.category.search");
 
-		String cheatModeCategoryName = Translator.translateToLocal("jei.key.category.cheat.mode");
-		IJeiKeyMappingCategoryBuilder cheat = inputHelper.createKeyMappingCategoryBuilder(cheatModeCategoryName);
+		IJeiKeyMappingCategoryBuilder cheat = inputHelper.createKeyMappingCategoryBuilder("jei.key.category.cheat.mode");
 
-		String hoverConfigButtonCategoryName = Translator.translateToLocal("jei.key.category.hover.config.button");
-		IJeiKeyMappingCategoryBuilder hoverConfig = inputHelper.createKeyMappingCategoryBuilder(hoverConfigButtonCategoryName);
+		IJeiKeyMappingCategoryBuilder hoverConfig = inputHelper.createKeyMappingCategoryBuilder("jei.key.category.hover.config.button");
 
-		String editModeCategoryName = Translator.translateToLocal("jei.key.category.edit.mode");
-		IJeiKeyMappingCategoryBuilder editMode = inputHelper.createKeyMappingCategoryBuilder(editModeCategoryName);
+		IJeiKeyMappingCategoryBuilder editMode = inputHelper.createKeyMappingCategoryBuilder("jei.key.category.edit.mode");
 
-		String recipeCategoryName = Translator.translateToLocal("jei.key.category.recipe.gui");
-		IJeiKeyMappingCategoryBuilder recipeCategory = inputHelper.createKeyMappingCategoryBuilder(recipeCategoryName);
+		IJeiKeyMappingCategoryBuilder recipeCategory = inputHelper.createKeyMappingCategoryBuilder("jei.key.category.recipe.gui");
 
-		String devToolsCategoryName = Translator.translateToLocal("jei.key.category.dev.tools");
-		IJeiKeyMappingCategoryBuilder devTools = inputHelper.createKeyMappingCategoryBuilder(devToolsCategoryName);
+		IJeiKeyMappingCategoryBuilder devTools = inputHelper.createKeyMappingCategoryBuilder("jei.key.category.dev.tools");
 
 		// Overlay
 		toggleOverlay = overlay.createMapping("key.jei.toggleOverlay")
@@ -160,6 +164,22 @@ public final class InternalKeyMappings implements IInternalKeyMappings {
 			.setModifier(JeiKeyModifier.CONTROL_OR_COMMAND)
 			.buildMouseLeft()
 			.register(registerMethod);
+
+		showBookmarkTooltipFeatures = mouseHover.createMapping("key.jei.showBookmarkTooltipFeatures")
+			.setContext(JeiKeyConflictContext.GUI)
+			.buildKeyboardKey(getDefaultBookmarkTooltipFeaturesKey())
+			.register(registerMethod);
+
+		quickMove = mouseHover.createMapping("key.jei.quickMove")
+				.setContext(JeiKeyConflictContext.JEI_GUI_HOVER)
+				.setModifier(JeiKeyModifier.SHIFT)
+				.buildMouseLeft()
+				.register(registerMethod);
+
+		shareToChat = mouseHover.createMapping("key.jei.shareToChat")
+				.setContext(JeiKeyConflictContext.JEI_GUI_HOVER)
+				.buildUnbound()
+				.register(registerMethod);
 
 		// Search Bar
 		hoveredClearSearchBar = search.createMapping("key.jei.clearSearchBar")
@@ -243,6 +263,11 @@ public final class InternalKeyMappings implements IInternalKeyMappings {
 		nextRecipePage = recipeCategory.createMapping("key.jei.nextRecipePage")
 			.setContext(JeiKeyConflictContext.GUI)
 			.buildKeyboardKey(GLFW.GLFW_KEY_PAGE_DOWN)
+			.register(registerMethod);
+
+		pauseRecipeCycling = recipeCategory.createMapping("key.jei.pauseRecipeCycling")
+			.setContext(JeiKeyConflictContext.GUI)
+			.buildKeyboardKey(GLFW.GLFW_KEY_LEFT_SHIFT)
 			.register(registerMethod);
 
 		previousCategory = recipeCategory.createMapping("key.jei.previousCategory")
@@ -350,6 +375,11 @@ public final class InternalKeyMappings implements IInternalKeyMappings {
 	}
 
 	@Override
+	public IJeiKeyMappingInternal getPauseRecipeCycling() {
+		return pauseRecipeCycling;
+	}
+
+	@Override
 	public IJeiKeyMapping getPreviousPage() {
 		return previousPage;
 	}
@@ -392,6 +422,21 @@ public final class InternalKeyMappings implements IInternalKeyMappings {
 	@Override
 	public IJeiKeyMapping getMaxTransferRecipeBookmark() {
 		return maxTransferRecipeBookmark;
+	}
+
+	@Override
+	public IJeiKeyMappingInternal getShowBookmarkTooltipFeatures() {
+		return showBookmarkTooltipFeatures;
+	}
+
+	@Override
+	public IJeiKeyMapping getQuickMove() {
+		return quickMove;
+	}
+
+	@Override
+	public IJeiKeyMapping getShareToChat() {
+		return shareToChat;
 	}
 
 	@Override

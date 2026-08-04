@@ -14,9 +14,9 @@ import mezz.jei.common.input.IInternalKeyMappings;
 import mezz.jei.common.network.IConnectionToServer;
 import mezz.jei.gui.bookmarks.BookmarkList;
 import mezz.jei.gui.filter.IFilterTextSource;
-import mezz.jei.gui.overlay.IIngredientGridSource;
-import mezz.jei.gui.overlay.IngredientGrid;
-import mezz.jei.gui.overlay.IngredientGridWithNavigation;
+import mezz.jei.gui.overlay.ingredients.IIngredientGridSource;
+import mezz.jei.gui.overlay.ingredients.IngredientGrid;
+import mezz.jei.gui.overlay.ingredients.IngredientGridWithNavigation;
 import mezz.jei.gui.overlay.IngredientListOverlay;
 import mezz.jei.gui.overlay.bookmarks.BookmarkOverlay;
 import mezz.jei.gui.overlay.bookmarks.history.LookupHistoryOverlay;
@@ -106,6 +106,8 @@ public final class OverlayHelper {
 			keyMappings,
 			ingredientGridConfig,
 			ingredientFilterConfig,
+			textures.getIngredientListBackground(),
+			textures.getIngredientListSlotBackground(),
 			clientConfig,
 			HistoryDisplaySide.RIGHT,
 			toggleState,
@@ -120,6 +122,7 @@ public final class OverlayHelper {
 			screenHelper,
 			ingredientListGridNavigation,
 			lookupHistoryOverlay,
+			ingredientGridConfig,
 			clientConfig,
 			toggleState,
 			keyMappings
@@ -163,6 +166,8 @@ public final class OverlayHelper {
 			keyMappings,
 			bookmarkListConfig,
 			ingredientFilterConfig,
+			textures.getBookmarkListBackground(),
+			textures.getBookmarkListSlotBackground(),
 			clientConfig,
 			HistoryDisplaySide.LEFT,
 			toggleState,
@@ -177,6 +182,7 @@ public final class OverlayHelper {
 			lookupHistoryOverlay,
 			toggleState,
 			clientConfig,
+			bookmarkListConfig,
 			screenHelper,
 			keyMappings
 		);

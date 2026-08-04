@@ -60,4 +60,9 @@ public class TestClientToggleState implements IClientToggleState {
 	@Override
 	public void setHiddenByEmi(boolean hidden) {
 	}
+
+	@Override
+	public void clearListeners() {
+
+	}
 }

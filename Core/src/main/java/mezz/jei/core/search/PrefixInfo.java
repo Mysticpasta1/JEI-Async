@@ -1,26 +1,30 @@
 package mezz.jei.core.search;
 
+import mezz.jei.api.search.ISearchStorageBuilder;
+import mezz.jei.api.search.ISearchStorageBuilderFactory;
 import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.Collection;
-import java.util.function.Supplier;
 
 public class PrefixInfo<T, I> {
+	private final String id;
 	private final char prefix;
 	private final IModeGetter modeGetter;
 	private final IStringsGetter<T> stringsGetter;
-	private final Supplier<ISearchStorage<I>> storageSupplier;
+	private final ISearchStorageBuilderFactory searchStorageBuilderFactory;
 
 	public PrefixInfo(
+		String id,
 		char prefix,
 		IModeGetter modeGetter,
 		IStringsGetter<T> stringsGetter,
-		Supplier<ISearchStorage<I>> storageSupplier
+		ISearchStorageBuilderFactory searchStorageBuilderFactory
 	) {
+		this.id = id;
 		this.prefix = prefix;
 		this.modeGetter = modeGetter;
 		this.stringsGetter = stringsGetter;
-		this.storageSupplier = storageSupplier;
+		this.searchStorageBuilderFactory = searchStorageBuilderFactory;
 	}
 
 	public char getPrefix() {
@@ -31,8 +35,8 @@ public class PrefixInfo<T, I> {
 		return modeGetter.getMode();
 	}
 
-	public ISearchStorage<I> createStorage() {
-		return this.storageSupplier.get();
+	public ISearchStorageBuilder<I> createStorageBuilder() {
+		return searchStorageBuilderFactory.create(id);
 	}
 
 	@Unmodifiable
@@ -53,6 +57,6 @@ public class PrefixInfo<T, I> {
 
 	@Override
 	public String toString() {
-		return "PrefixInfo{" + prefix + '}';
+		return "PrefixInfo{" + id + '}';
 	}
 }

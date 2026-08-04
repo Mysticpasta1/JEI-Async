@@ -16,6 +16,7 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.server.packs.resources.ResourceManagerReloadListener;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -50,16 +51,22 @@ public class ClientLifecycleHandler {
 	}
 
 	public void registerEvents() {
-		JeiLifecycleEvents.GAME_START.register(() ->
-			JeiLifecycleEvents.AFTER_RECIPE_SYNC.register(() -> {
-				if (running) {
-					stopJei();
-				}
-				// Wait for world to load before starting JEI
-				waitingForWorldLoad = true;
-				LOGGER.info("JEI: Recipe sync complete, waiting for world load...");
-			})
-		);
+		JeiLifecycleEvents.AFTER_RECIPES_UPDATED.register(() -> {
+			if (running) {
+				stopJei();
+			}
+			// Wait for world to load before starting JEI
+			waitingForWorldLoad = true;
+			LOGGER.info("JEI: Recipe sync complete, waiting for world load...");
+		});
+		ScreenEvents.AFTER_INIT.register((minecraft, screen, scaledWidth, scaledHeight) -> {
+			// waitingForWorldLoad means the start is deliberately pending on the world load tick
+			// below, so this fallback only covers the case where the recipe event never fired.
+			if (!running && !waitingForWorldLoad && screen instanceof AbstractContainerScreen && minecraft.player != null) {
+				LOGGER.error("A Screen is opening but JEI hasn't started yet because the update recipes event didn't happen.");
+				startJei();
+			}
+		});
 		JeiLifecycleEvents.GAME_STOP.register(this::stopJei);
 
 		// Listen for client ticks to detect when the world is fully loaded
@@ -111,6 +118,9 @@ public class ClientLifecycleHandler {
 	}
 
 	private void stopJei() {
+		if (!running) {
+			return;
+		}
 		LOGGER.info("Stopping JEI");
 		this.jeiStarter.stop();
 		running = false;

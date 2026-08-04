@@ -1,35 +1,28 @@
+@file:Suppress("UnstableApiUsage")
+
 pluginManagement {
 	repositories {
-		fun exclusiveMaven(url: String, filter: Action<InclusiveRepositoryContentDescriptor>) =
+		fun exclusiveMaven(url: String, vararg groupPrefixes: String) =
 			exclusiveContent {
 				forRepository { maven(url) }
-				filter(filter)
+				filter {
+					groupPrefixes.forEach(::includeGroupAndSubgroups)
+				}
 			}
-		maven("https://maven.minecraftforge.net") {
-			content {
-				includeGroupByRegex("net\\.minecraftforge.*")
-			}
-		}
-		exclusiveMaven("https://maven.parchmentmc.org") {
-			includeGroupByRegex("org\\.parchmentmc.*")
-		}
-		exclusiveMaven("https://maven.fabricmc.net/") {
-			includeGroup("net.fabricmc")
-			includeGroup("fabric-loom")
-		}
+		exclusiveMaven("https://maven.minecraftforge.net", "net.minecraftforge")
+		exclusiveMaven("https://maven.parchmentmc.org", "org.parchmentmc")
+		exclusiveMaven("https://maven.fabricmc.net/", "net.fabricmc", "fabric-loom")
+		exclusiveMaven("https://maven.neoforged.net/releases", "net.neoforged", "codechicken", "net.covers1624")
 		maven("https://repo.spongepowered.org/repository/maven-public/") {
 			content {
-				includeGroupByRegex("org\\.spongepowered.*")
-				includeGroupByRegex("net\\.minecraftforge.*")
+				includeGroupAndSubgroups("org.spongepowered")
+				includeGroupAndSubgroups("net.minecraftforge")
 			}
 		}
 		gradlePluginPortal()
 	}
 	resolutionStrategy {
 		eachPlugin {
-			if (requested.id.id == "net.minecraftforge.gradle") {
-				useModule("${requested.id}:ForgeGradle:${requested.version}")
-			}
 			if (requested.id.id == "org.spongepowered.mixin") {
 				useModule("org.spongepowered:mixingradle:${requested.version}")
 			}
@@ -44,6 +37,7 @@ include(
 	"Core",
 	"Changelog",
 	"Common", "CommonApi",
+	"Debug",
 	"Forge", "ForgeApi",
 	"Fabric", "FabricApi",
 	"Library",

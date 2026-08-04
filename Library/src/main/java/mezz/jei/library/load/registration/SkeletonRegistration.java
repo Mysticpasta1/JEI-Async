@@ -1,6 +1,10 @@
 package mezz.jei.library.load.registration;
 
 import mezz.jei.api.helpers.IJeiHelpers;
+import mezz.jei.api.search.ISearchStorage;
+import mezz.jei.api.search.ISearchStorageBuilderFactory;
+import mezz.jei.api.search.ISearchStorageFactory;
+import mezz.jei.core.search.BakedSubstringIndexBuilder;
 import mezz.jei.api.ingredients.IIngredientType;
 import mezz.jei.api.recipe.IRecipeManager;
 import mezz.jei.api.recipe.RecipeType;
@@ -86,6 +90,22 @@ public class SkeletonRegistration implements
 	@Override
 	public IVanillaRecipeFactory getVanillaRecipeFactory() {
 		return jeiHelpers.getVanillaRecipeFactory();
+	}
+
+	@Override
+	public ISearchStorageBuilderFactory getSearchStorageBuilderFactory() {
+		return BakedSubstringIndexBuilder::new;
+	}
+
+	@SuppressWarnings("removal")
+	@Override
+	public ISearchStorageFactory getSearchStorageFactory() {
+		return new ISearchStorageFactory() {
+			@Override
+			public <T> ISearchStorage<T> createSearchStorage() {
+				return new BakedSubstringIndexBuilder<T>().build();
+			}
+		};
 	}
 
 	@Override

@@ -21,8 +21,7 @@ public class TestIngredientFilterConfig implements IIngredientFilterConfig {
 
 	@Override
 	public SearchMode getColorSearchMode() {
-		// TODO enable testing color search
-		return SearchMode.DISABLED;
+		return SearchMode.REQUIRE_PREFIX;
 	}
 
 	@Override
@@ -46,6 +45,11 @@ public class TestIngredientFilterConfig implements IIngredientFilterConfig {
 	}
 
 	@Override
+	public boolean getSearchModAliases() {
+		return false;
+	}
+
+	@Override
 	public boolean getSearchIngredientAliases() {
 		return false;
 	}
@@ -53,5 +57,10 @@ public class TestIngredientFilterConfig implements IIngredientFilterConfig {
 	@Override
 	public boolean getSearchShortModNames() {
 		return false;
+	}
+
+	@Override
+	public void addSearchConfigListener(Runnable listener) {
+
 	}
 }

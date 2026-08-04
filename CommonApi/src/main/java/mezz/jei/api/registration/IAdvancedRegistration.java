@@ -48,7 +48,10 @@ public interface IAdvancedRegistration {
 	 * Get access to disable various JEI features.
 	 * This may be needed by mods that substantially change hard-coded vanilla behaviors.
 	 *
-	 * @since 17.3.0
+	 * @since 15.3.0
+	 * @deprecated use {@link IModPlugin#configureJei(mezz.jei.api.runtime.IJeiFeatures)}.
+	 * This is too late in JEI's lifecycle for feature configuration that affects startup.
 	 */
+	@Deprecated(forRemoval = true, since = "15.28.0")
 	IJeiFeatures getJeiFeatures();
 }

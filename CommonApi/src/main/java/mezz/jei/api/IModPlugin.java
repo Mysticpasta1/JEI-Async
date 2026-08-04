@@ -2,9 +2,11 @@ package mezz.jei.api;
 
 import mezz.jei.api.helpers.IPlatformFluidHelper;
 import mezz.jei.api.registration.IAdvancedRegistration;
+import mezz.jei.api.registration.IAdvancedSearchRegistration;
 import mezz.jei.api.registration.IExtraIngredientRegistration;
 import mezz.jei.api.registration.IGuiHandlerRegistration;
 import mezz.jei.api.registration.IIngredientAliasRegistration;
+import mezz.jei.api.registration.IModInfoRegistration;
 import mezz.jei.api.registration.IModIngredientRegistration;
 import mezz.jei.api.registration.IRecipeCatalystRegistration;
 import mezz.jei.api.registration.IRecipeCategoryRegistration;
@@ -13,6 +15,7 @@ import mezz.jei.api.registration.IRecipeTransferRegistration;
 import mezz.jei.api.registration.IRuntimeRegistration;
 import mezz.jei.api.registration.ISubtypeRegistration;
 import mezz.jei.api.registration.IVanillaCategoryExtensionRegistration;
+import mezz.jei.api.runtime.IJeiFeatures;
 import mezz.jei.api.runtime.IJeiRuntime;
 import mezz.jei.api.runtime.config.IJeiConfigManager;
 import net.minecraft.resources.ResourceLocation;
@@ -28,6 +31,20 @@ public interface IModPlugin {
 	 * The namespace should be your mod's modId.
 	 */
 	ResourceLocation getPluginUid();
+
+	/**
+	 * Configure JEI feature changes.
+	 *
+	 * <p>
+	 * This is called early, before JEI collects ingredients, recipes, GUI handlers, and runtime registrations.
+	 * Use this for features that need to affect JEI startup, such as {@link IJeiFeatures#disableJeiGui()}.
+	 * </p>
+	 *
+	 * @since 15.28.0
+	 */
+	default void configureJei(IJeiFeatures jeiFeatures) {
+
+	}
 
 	/**
 	 * If your item has subtypes that depend on NBT or capabilities, use this to help JEI identify those subtypes correctly.
@@ -71,6 +88,24 @@ public interface IModPlugin {
 	 * @since 15.15.0
 	 */
 	default void registerIngredientAliases(IIngredientAliasRegistration registration) {
+
+	}
+
+	/**
+	 * Register extra info about a mod, such as aliases for the mod that users can search for.
+	 *
+	 * @since 15.21.0
+	 */
+	default void registerModInfo(IModInfoRegistration registration) {
+
+	}
+
+	/**
+	 * Register advanced custom search behavior for JEI.
+	 *
+	 * @since 15.22.0
+	 */
+	default void registerAdvancedSearch(IAdvancedSearchRegistration registration) {
 
 	}
 

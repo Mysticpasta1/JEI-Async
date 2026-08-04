@@ -1,7 +1,7 @@
 package mezz.jei.core.search;
 
+import mezz.jei.api.search.ISearchStorage;
 import mezz.jei.core.collect.SetMultiMap;
-import mezz.jei.core.search.suffixtree.GeneralizedSuffixTree;
 
 import java.util.Collection;
 import java.util.Collections;
@@ -10,20 +10,30 @@ import java.util.Set;
 import java.util.function.Consumer;
 
 /**
- * This is more memory-efficient than {@link GeneralizedSuffixTree}
- * when there are many values for each key.
+ * This is more memory-efficient than storing each value directly in an {@link ISearchStorage}
+ * when many values share each key.
  *
  * It stores a map of keys to a set of values.
- * The set values are shared with the internal {@link GeneralizedSuffixTree} to index and find them.
- * The sets values are modified directly when values with the same key are added.
+ * The set values are shared with the internal backing search storage to index and find them.
+ * The set's values are modified directly when values with the same key are added.
  */
 public class LimitedStringStorage<T> implements ISearchStorage<T> {
-	private final SetMultiMap<String, T> multiMap = new SetMultiMap<>(() -> Collections.newSetFromMap(new IdentityHashMap<>()));
-	private final GeneralizedSuffixTree<Set<T>> generalizedSuffixTree = new GeneralizedSuffixTree<>();
+	private final SetMultiMap<String, T> multiMap;
+	private final ISearchStorage<Set<T>> backingStorage;
+
+	public LimitedStringStorage(ISearchStorage<Set<T>> searchStorage) {
+		this.backingStorage = searchStorage;
+		this.multiMap = new SetMultiMap<>(() -> Collections.newSetFromMap(new IdentityHashMap<>()));
+	}
+
+	public LimitedStringStorage(ISearchStorage<Set<T>> searchStorage, SetMultiMap<String, T> multiMap) {
+		this.backingStorage = searchStorage;
+		this.multiMap = multiMap;
+	}
 
 	@Override
 	public void getSearchResults(String token, Consumer<Collection<T>> resultsConsumer) {
-		generalizedSuffixTree.getSearchResults(token, resultSet -> {
+		backingStorage.getSearchResults(token, resultSet -> {
 			for (Collection<T> result : resultSet) {
 				resultsConsumer.accept(result);
 			}
@@ -42,12 +52,12 @@ public class LimitedStringStorage<T> implements ISearchStorage<T> {
 		multiMap.put(key, value);
 		if (isNewKey) {
 			Set<T> set = multiMap.get(key);
-			generalizedSuffixTree.put(key, set);
+			backingStorage.put(key, set);
 		}
 	}
 
 	@Override
 	public String statistics() {
-		return "LimitedStringStorage: " + generalizedSuffixTree.statistics();
+		return "LimitedStringStorage: " + backingStorage.statistics();
 	}
 }

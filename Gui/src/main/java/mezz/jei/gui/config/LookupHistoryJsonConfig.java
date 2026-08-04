@@ -8,6 +8,7 @@ import mezz.jei.api.recipe.IRecipeManager;
 import mezz.jei.api.runtime.IIngredientManager;
 import mezz.jei.common.config.file.serializers.TypedIngredientSerializer;
 import mezz.jei.common.util.DeduplicatingRunner;
+import mezz.jei.common.util.PathUtil;
 import mezz.jei.common.util.ServerConfigPathUtil;
 import mezz.jei.gui.bookmarks.IBookmark;
 import mezz.jei.gui.bookmarks.IngredientBookmark;
@@ -27,7 +28,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
-import static mezz.jei.gui.config.BookmarkConfig.*;
+import static mezz.jei.gui.config.BookmarkConfig.MARKER_INGREDIENT;
+import static mezz.jei.gui.config.BookmarkConfig.MARKER_RECIPE;
+import static mezz.jei.gui.config.BookmarkConfig.MARKER_STACK;
+import static mezz.jei.gui.config.BookmarkConfig.loadIngredientBookmark;
+import static mezz.jei.gui.config.BookmarkConfig.loadItemStackBookmark;
+import static mezz.jei.gui.config.BookmarkConfig.loadRecipeBookmark;
 
 public class LookupHistoryJsonConfig implements ILookupHistoryConfig {
 	private static final Logger LOGGER = LogManager.getLogger();
@@ -42,7 +48,7 @@ public class LookupHistoryJsonConfig implements ILookupHistoryConfig {
 				try {
 					Files.createDirectories(configPath);
 				} catch (IOException e) {
-					LOGGER.error("Unable to create lookup history config folder: {}", configPath);
+					LOGGER.error("Unable to create lookup history config folder: {}", configPath, e);
 					return Optional.empty();
 				}
 				Path path = configPath.resolve("lookupHistory.ini");
@@ -61,10 +67,11 @@ public class LookupHistoryJsonConfig implements ILookupHistoryConfig {
 		IFocusFactory focusFactory,
 		List<IBookmark> bookmarks
 	) {
+		List<IBookmark> bookmarksSnapshot = List.copyOf(bookmarks);
 		getPath(jeiConfigurationDir)
 			.ifPresent(path -> {
 				delayedSave.run(() -> {
-					save(path, recipeManager, ingredientManager, focusFactory, bookmarks);
+					save(path, recipeManager, ingredientManager, focusFactory, bookmarksSnapshot);
 				});
 			});
 	}
@@ -77,7 +84,7 @@ public class LookupHistoryJsonConfig implements ILookupHistoryConfig {
 		List<IBookmark> bookmarks) {
 		List<String> strings = new ArrayList<>();
 		TypedIngredientSerializer ingredientSerializer = new TypedIngredientSerializer(ingredientManager);
-		RecipeBookmarkSerializer recipeBookmarkSerializer = new RecipeBookmarkSerializer(recipeManager, focusFactory, ingredientSerializer);
+		RecipeBookmarkSerializer recipeBookmarkSerializer = new RecipeBookmarkSerializer(recipeManager, focusFactory, ingredientSerializer, ingredientManager);
 		for (IBookmark bookmark : bookmarks) {
 			if (bookmark instanceof IngredientBookmark<?> ingredientBookmark) {
 				ITypedIngredient<?> typedIngredient = ingredientBookmark.getIngredient();
@@ -94,9 +101,9 @@ public class LookupHistoryJsonConfig implements ILookupHistoryConfig {
 		}
 
 		try {
-			Files.write(path, strings);
+			PathUtil.writeUsingTempFile(path, strings);
 			LOGGER.debug("Saved lookup history config to file {}", path);
-		} catch (IOException e) {
+		} catch (RuntimeException | IOException e) {
 			LOGGER.error("Failed to save lookup history config to file {}", path, e);
 		}
 	}
@@ -131,7 +138,7 @@ public class LookupHistoryJsonConfig implements ILookupHistoryConfig {
 				}
 
 				TypedIngredientSerializer ingredientSerializer = new TypedIngredientSerializer(ingredientManager);
-				RecipeBookmarkSerializer recipeBookmarkSerializer = new RecipeBookmarkSerializer(recipeManager, focusFactory, ingredientSerializer);
+				RecipeBookmarkSerializer recipeBookmarkSerializer = new RecipeBookmarkSerializer(recipeManager, focusFactory, ingredientSerializer, ingredientManager);
 
 				IIngredientHelper<ItemStack> itemStackHelper = ingredientManager.getIngredientHelper(VanillaTypes.ITEM_STACK);
 				List<IBookmark> bookmarks = new ArrayList<>();

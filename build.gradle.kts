@@ -1,6 +1,6 @@
 plugins {
     // https://plugins.gradle.org/plugin/com.diffplug.gradle.spotless
-	id("com.diffplug.spotless") version("6.25.0")
+	id("com.diffplug.spotless") version("8.8.0")
 
     // https://plugins.gradle.org/plugin/com.dorongold.task-tree
     id("com.dorongold.task-tree") version("4.0.0")
@@ -8,14 +8,13 @@ plugins {
     // https://repo.spongepowered.org/service/rest/repository/browse/maven-public/org/spongepowered/vanillagradle/
     id("org.spongepowered.gradle.vanilla") version("0.2.1-SNAPSHOT") apply(false)
 
-    // https://files.minecraftforge.net/net/minecraftforge/gradle/ForgeGradle/index.html
-    id("net.minecraftforge.gradle") version("6.0.26") apply(false)
+    // https://projects.neoforged.net/neoforged/ModDevGradle
+    id("net.neoforged.moddev.legacyforge") version("2.0.143") apply(false)
 
-    // https://mvnrepository.com/artifact/org.parchmentmc.librarian.forgegradle/org.parchmentmc.librarian.forgegradle.gradle.plugin
-    id("org.parchmentmc.librarian.forgegradle") version("1.2.0") apply(false)
+    id("net.mezzdev.modshade") version("0.3.0") apply(false)
 
     // https://plugins.gradle.org/plugin/me.modmuss50.mod-publish-plugin
-    id("me.modmuss50.mod-publish-plugin") version("0.7.3") apply(false)
+    id("me.modmuss50.mod-publish-plugin") version("2.0.1") apply(false)
 
     // https://maven.fabricmc.net/fabric-loom/fabric-loom.gradle.plugin/maven-metadata.xml
     id("fabric-loom") version("1.8.0-alpha.16") apply(false)
@@ -23,6 +22,7 @@ plugins {
 apply {
 	from("buildtools/ColoredOutput.gradle")
 }
+
 repositories {
     mavenCentral()
 }
@@ -54,10 +54,16 @@ spotless {
 		endWithNewline()
 		trimTrailingWhitespace()
 		removeUnusedImports()
-        indentWithTabs(4)
-        replaceRegex("class-level javadoc indentation fix", "^\\*", " *")
-        replaceRegex("method-level javadoc indentation fix", "\t\\*", "\t *")
-    }
+		forbidWildcardImports()
+		replaceRegex(
+			"single-line if block formatting",
+			"""(?m)^([ \t]*)if[ \t]*(\([^{}\r\n]+\))[ \t]*\{[ \t]*([^{}\r\n]+?)[ \t]*}${'$'}""",
+			"${'$'}1if ${'$'}2 {\n${'$'}1\t${'$'}3\n${'$'}1}"
+		)
+		leadingSpacesToTabs(4)
+		replaceRegex("class-level javadoc indentation fix", "^\\*", " *")
+		replaceRegex("method-level javadoc indentation fix", "\t\\*", "\t *")
+	}
 }
 
 subprojects {
@@ -119,3 +125,5 @@ subprojects {
         isReproducibleFileOrder = true
     }
 }
+
+apply(from = "gradle/api-compatibility.gradle.kts")

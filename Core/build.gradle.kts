@@ -15,8 +15,20 @@ val jUnitVersion: String by extra
 val minecraftVersion: String by extra
 val modId: String by extra
 val modJavaVersion: String by extra
+val bakedSubstringIndexVersion: String by extra
+
+val dependencyProjects: List<Project> = listOf(
+    project(":CommonApi"),
+)
+
+dependencyProjects.forEach {
+    project.evaluationDependsOn(it.path)
+}
 
 dependencies {
+    dependencyProjects.forEach {
+        implementation(it)
+    }
     implementation(
         group = "com.google.guava",
         name = "guava",
@@ -37,6 +49,13 @@ dependencies {
         name = "log4j-api",
         version = "2.17.0"
     )
+    implementation(
+        group = "net.mezzdev",
+        name = "baked-substring-index",
+        version = bakedSubstringIndexVersion
+    ) {
+        isTransitive = false
+    }
     testImplementation(
         group = "org.junit.jupiter",
         name = "junit-jupiter-api",
@@ -105,6 +124,24 @@ publishing {
             artifactId = baseArchivesName
             artifact(tasks.jar.get())
             artifact(sourcesJarTask.get())
+
+            val dependencyInfos = dependencyProjects.map {
+                mapOf(
+                    "groupId" to it.group,
+                    "artifactId" to it.base.archivesName.get(),
+                    "version" to it.version
+                )
+            }
+
+            pom.withXml {
+                val dependenciesNode = asNode().appendNode("dependencies")
+                dependencyInfos.forEach {
+                    val dependencyNode = dependenciesNode.appendNode("dependency")
+                    it.forEach { (key, value) ->
+                        dependencyNode.appendNode(key, value)
+                    }
+                }
+            }
         }
     }
     repositories {

@@ -7,6 +7,7 @@ plugins {
     idea
     `maven-publish`
     id("fabric-loom")
+    id("net.mezzdev.modshade")
     id("me.modmuss50.mod-publish-plugin")
 }
 
@@ -42,6 +43,7 @@ val parchmentVersionFabric: String by extra
 val modrinthId: String by extra
 val amecsVersionFabric: String by extra
 val amecsMinecraftVersion: String by extra
+val bakedSubstringIndexVersion: String by extra
 
 // set by ORG_GRADLE_PROJECT_modrinthToken in Jenkinsfile
 val modrinthToken: String? by project
@@ -60,11 +62,29 @@ val dependencyProjects: List<ProjectDependency> = listOf(
     project.dependencies.project(":Gui"),
     project.dependencies.project(":FabricApi", configuration = "namedElements")
 )
+val debugProject = project(":Debug")
 
 dependencyProjects.forEach {
     project.evaluationDependsOn(it.dependencyProject.path)
 }
+project.evaluationDependsOn(debugProject.path)
 project.evaluationDependsOn(":Changelog")
+val debugSourceSet = debugProject.sourceSets.main.get()
+
+val clientGameTestSourceSet = sourceSets.create("clientGameTest") {
+    compileClasspath += sourceSets.main.get().output + sourceSets.main.get().compileClasspath
+    runtimeClasspath += output + sourceSets.main.get().runtimeClasspath
+}
+configurations.named(clientGameTestSourceSet.runtimeOnlyConfigurationName) {
+    extendsFrom(configurations.runtimeOnly.get())
+}
+val clientTestModId = "${modId}-client-tests"
+
+fun clientTestGameDirectory(runName: String) =
+    layout.projectDirectory.dir("run/$runName")
+
+fun capitalizedRunName(runName: String): String =
+    runName.replaceFirstChar { it.uppercase() }
 
 java {
     toolchain {
@@ -122,9 +142,23 @@ dependencies {
     dependencyProjects.forEach {
         implementation(it)
     }
+    modShadeImplementation("net.mezzdev:baked-substring-index:${bakedSubstringIndexVersion}") {
+        isTransitive = false
+    }
 }
 
 loom {
+    mods {
+        create("jei") {
+            sourceSet(sourceSets.main.get())
+            for (dependencyProject in dependencyProjects) {
+                sourceSet(dependencyProject.dependencyProject.sourceSets.main.get())
+            }
+        }
+        create(clientTestModId) {
+            sourceSet(clientGameTestSourceSet)
+        }
+    }
     runs {
         val dependencyJarPaths = dependencyProjects.map {
             it.dependencyProject.tasks.jar.get().archiveFile.get().asFile
@@ -138,10 +172,8 @@ loom {
             it.absoluteFile.toString()
         }
 
-        // loom 1.11 runDir takes a directory relative to the root directory
-        val loomRunDir = project.projectDir
-            .relativeTo(project.rootDir)
-            .resolve("run")
+        // Loom 1.8 runDir takes a directory relative to this project directory.
+        val loomRunDir = File("run")
 
         named("client") {
             client()
@@ -157,6 +189,22 @@ loom {
             runDir(loomRunDir.resolve("server").toString())
             vmArgs("-Dfabric.classPathGroups=${classPathGroupsString}")
         }
+        create("clientKeyMappingTest") {
+            client()
+            source(clientGameTestSourceSet)
+            configName = "Fabric Client Key Mapping Test"
+            ideConfigGenerated(false)
+            runDir(loomRunDir.resolve("clientKeyMappingTest").toString())
+            property("jei.fabric.clientTest", "keyMapping")
+            vmArgs("-Dfabric.log.level=info")
+            programArgs("--username", "JeiClientTest")
+        }
+        create("clientKeyMappingTestWithoutAmecs") {
+            inherit(named("clientKeyMappingTest").get())
+            configName = "Fabric Client Key Mapping Test Without AMECS"
+            runDir(loomRunDir.resolve("clientKeyMappingTestWithoutAmecs").toString())
+            property("jei.fabric.disableAmecsSupport", "true")
+        }
     }
 
     accessWidenerPath.set(file("src/main/resources/jei.accesswidener"))
@@ -169,6 +217,48 @@ sourceSets {
                 srcDir(p.dependencyProject.sourceSets.main.get().resources)
             }
         }
+    }
+}
+
+val writeClientTestOptionsTasks = listOf(
+    "clientKeyMappingTest",
+    "clientKeyMappingTestWithoutAmecs"
+).associateWith { runName ->
+    tasks.register<Copy>("write${capitalizedRunName(runName)}Options") {
+        from(layout.projectDirectory.file("src/clientGameTest/templates/options.txt"))
+        into(clientTestGameDirectory(runName))
+    }
+}
+
+tasks.named("runClientKeyMappingTest") {
+    dependsOn(writeClientTestOptionsTasks.getValue("clientKeyMappingTest"))
+}
+
+tasks.named("runClientKeyMappingTestWithoutAmecs") {
+    dependsOn(writeClientTestOptionsTasks.getValue("clientKeyMappingTestWithoutAmecs"))
+    mustRunAfter("runClientKeyMappingTest")
+}
+
+tasks.register("runClientGameTest") {
+    group = "mod development"
+    description = "Runs JEI Fabric client tests with AMECS support enabled."
+    dependsOn("runClientKeyMappingTest")
+}
+
+tasks.register("runClientGameTestWithoutAmecs") {
+    group = "mod development"
+    description = "Runs JEI Fabric client tests with AMECS support disabled."
+    dependsOn("runClientKeyMappingTestWithoutAmecs")
+}
+
+val debugClassesTask = debugProject.tasks.named(debugSourceSet.classesTaskName)
+val debugModPath = debugProject.layout.buildDirectory.dir("resources/main").get().asFile.absolutePath
+val debugRunTasks = setOf("runClient", "runServer")
+tasks.matching { it.name in debugRunTasks }.configureEach {
+    dependsOn(debugClassesTask)
+    if (this is org.gradle.api.tasks.JavaExec) {
+        classpath(debugSourceSet.output)
+        jvmArgs("-Dfabric.addMods=$debugModPath")
     }
 }
 
@@ -189,8 +279,11 @@ tasks.named<Jar>("sourcesJar") {
     archiveClassifier.set("sources")
 }
 
+val shadedJar = modShade.shadeJar()
+val shadedSourcesJar = modShade.shadeSourcesJar()
+
 publishMods {
-    file.set(tasks.remapJar.get().archiveFile)
+    file.set(shadedJar.flatMap { it.archiveFile })
     changelog.set(provider { file("../Changelog/changelog.md").readText() })
     type = BETA
     modLoaders.add("fabric")
@@ -199,6 +292,7 @@ publishMods {
 
     curseforge {
         projectId = curseProjectId
+        projectSlug = curseHomepageUrl.substringAfterLast("/")
         accessToken.set(curseforgeApikey ?: "0")
         changelog.set(provider { file("../Changelog/changelog.html").readText() })
         changelogType = "html"
@@ -207,6 +301,9 @@ publishMods {
             end = minecraftVersion
         }
         javaVersions.add(JavaVersion.toVersion(modJavaVersion))
+        client = true
+        server = true
+        dryRun = curseforgeApikey == null
     }
 
     modrinth {
@@ -216,6 +313,7 @@ publishMods {
             start = minecraftVersionRangeStart
             end = minecraftVersion
         }
+        dryRun = modrinthToken == null
     }
 }
 tasks.withType<PublishModTask> {
@@ -244,26 +342,7 @@ publishing {
             @Suppress("UnstableApiUsage")
             loom.disableDeprecatedPomGeneration(this)
             artifactId = baseArchivesName
-            artifact(tasks.remapJar)
-            artifact(tasks.remapSourcesJar)
-
-            val dependencyInfos = dependencyProjects.map {
-                mapOf(
-                    "groupId" to it.group,
-                    "artifactId" to it.dependencyProject.base.archivesName.get(),
-                    "version" to it.version
-                )
-            }
-
-            pom.withXml {
-                val dependenciesNode = asNode().appendNode("dependencies")
-                dependencyInfos.forEach {
-                    val dependencyNode = dependenciesNode.appendNode("dependency")
-                    it.forEach { (key, value) ->
-                        dependencyNode.appendNode(key, value)
-                    }
-                }
-            }
+            from(components["modShade"])
         }
     }
     repositories {

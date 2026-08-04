@@ -19,6 +19,7 @@ import mezz.jei.api.recipe.transfer.IRecipeTransferHandlerHelper;
 import mezz.jei.api.recipe.vanilla.IJeiBrewingRecipe;
 import mezz.jei.api.recipe.vanilla.IVanillaRecipeFactory;
 import mezz.jei.api.registration.IGuiHandlerRegistration;
+import mezz.jei.api.registration.IModInfoRegistration;
 import mezz.jei.api.registration.IModIngredientRegistration;
 import mezz.jei.api.registration.IRecipeCatalystRegistration;
 import mezz.jei.api.registration.IRecipeCategoryRegistration;
@@ -56,6 +57,8 @@ import mezz.jei.library.plugins.vanilla.crafting.replacers.ShieldDecorationRecip
 import mezz.jei.library.plugins.vanilla.crafting.replacers.ShulkerBoxColoringRecipeMaker;
 import mezz.jei.library.plugins.vanilla.crafting.replacers.SuspiciousStewRecipeMaker;
 import mezz.jei.library.plugins.vanilla.crafting.replacers.TippedArrowRecipeMaker;
+import mezz.jei.library.plugins.vanilla.grindstone.GrindstoneRecipeCategory;
+import mezz.jei.library.plugins.vanilla.grindstone.GrindstoneRecipeMaker;
 import mezz.jei.library.plugins.vanilla.gui.InventoryEffectRendererGuiHandler;
 import mezz.jei.library.plugins.vanilla.gui.RecipeBookGuiHandler;
 import mezz.jei.library.plugins.vanilla.gui.ToastGuiHandler;
@@ -81,6 +84,7 @@ import net.minecraft.client.gui.screens.inventory.BrewingStandScreen;
 import net.minecraft.client.gui.screens.inventory.CraftingScreen;
 import net.minecraft.client.gui.screens.inventory.EffectRenderingInventoryScreen;
 import net.minecraft.client.gui.screens.inventory.FurnaceScreen;
+import net.minecraft.client.gui.screens.inventory.GrindstoneScreen;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.client.gui.screens.inventory.SmithingScreen;
 import net.minecraft.client.gui.screens.inventory.SmokerScreen;
@@ -114,13 +118,11 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.function.Supplier;
-import java.util.stream.Stream;
 
 @JeiPlugin
 public class VanillaPlugin implements IModPlugin {
@@ -175,6 +177,11 @@ public class VanillaPlugin implements IModPlugin {
 		registerFluidIngredients(registration, platformFluidHelper);
 	}
 
+	@Override
+	public void registerModInfo(IModInfoRegistration registration) {
+		registration.addModAliases(ModIds.MINECRAFT_ID, "mc");
+	}
+
 	private <T> void registerFluidIngredients(IModIngredientRegistration registration, IPlatformFluidHelperInternal<T> platformFluidHelper) {
 		ISubtypeManager subtypeManager = registration.getSubtypeManager();
 		IColorHelper colorHelper = registration.getColorHelper();
@@ -203,7 +210,8 @@ public class VanillaPlugin implements IModPlugin {
 			new CompostableRecipeCategory(guiHelper),
 			new FurnaceFuelCategory(textures),
 			new BrewingRecipeCategory(guiHelper),
-			new AnvilRecipeCategory(guiHelper)
+			new AnvilRecipeCategory(guiHelper),
+			new GrindstoneRecipeCategory(guiHelper)
 		);
 	}
 
@@ -256,6 +264,7 @@ public class VanillaPlugin implements IModPlugin {
 		List<IJeiBrewingRecipe> brewingRecipes = recipeHelper.getBrewingRecipes(ingredientManager, vanillaRecipeFactory);
 		brewingRecipes.sort(Comparator.comparingInt(IJeiBrewingRecipe::getBrewingSteps));
 		registration.addRecipes(RecipeTypes.BREWING, brewingRecipes);
+		registration.addRecipes(RecipeTypes.GRINDSTONE, GrindstoneRecipeMaker.getGrindstoneRecipes(ingredientManager, recipeHelper));
 	}
 
 	@Override
@@ -267,6 +276,7 @@ public class VanillaPlugin implements IModPlugin {
 		registration.addRecipeClickArea(SmokerScreen.class, 78, 32, 28, 23, RecipeTypes.SMOKING, RecipeTypes.FUELING);
 		registration.addRecipeClickArea(BlastFurnaceScreen.class, 78, 32, 28, 23, RecipeTypes.BLASTING, RecipeTypes.FUELING);
 		registration.addRecipeClickArea(AnvilScreen.class, 102, 48, 22, 15, RecipeTypes.ANVIL);
+		registration.addRecipeClickArea(GrindstoneScreen.class, 92, 31, 28, 21, RecipeTypes.GRINDSTONE);
 		registration.addRecipeClickArea(SmithingScreen.class, 68, 49, 22, 15, RecipeTypes.SMITHING);
 
 		registration.addGenericGuiContainerHandler(EffectRenderingInventoryScreen.class, new InventoryEffectRendererGuiHandler<>());
@@ -287,7 +297,7 @@ public class VanillaPlugin implements IModPlugin {
 		registration.addRecipeTransferHandler(BlastFurnaceMenu.class, MenuType.BLAST_FURNACE, RecipeTypes.FUELING, 1, 1, 3, 36);
 		registration.addRecipeTransferHandler(BrewingStandMenu.class, MenuType.BREWING_STAND, RecipeTypes.BREWING, 0, 4, 5, 36);
 		registration.addRecipeTransferHandler(AnvilMenu.class, MenuType.ANVIL, RecipeTypes.ANVIL, 0, 2, 3, 36);
-		registration.addRecipeTransferHandler(SmithingMenu.class, MenuType.SMITHING, RecipeTypes.SMITHING, 0, 3, 3, 36);
+		registration.addRecipeTransferHandler(SmithingMenu.class, MenuType.SMITHING, RecipeTypes.SMITHING, 0, 3, 4, 36);
 
 		IRecipeTransferHandlerHelper transferHelper = registration.getTransferHelper();
 		PlayerRecipeTransferHandler recipeTransferHandler = new PlayerRecipeTransferHandler(transferHelper);
@@ -314,6 +324,7 @@ public class VanillaPlugin implements IModPlugin {
 		registration.addRecipeCatalyst(Blocks.BLAST_FURNACE, RecipeTypes.BLASTING);
 		registration.addRecipeCatalyst(Blocks.BREWING_STAND, RecipeTypes.BREWING);
 		registration.addRecipeCatalyst(Blocks.ANVIL, RecipeTypes.ANVIL);
+		registration.addRecipeCatalyst(Blocks.GRINDSTONE, RecipeTypes.GRINDSTONE);
 		registration.addRecipeCatalyst(Blocks.SMITHING_TABLE, RecipeTypes.SMITHING);
 		registration.addRecipeCatalyst(Blocks.COMPOSTER, RecipeTypes.COMPOSTING);
 	}
@@ -334,28 +345,42 @@ public class VanillaPlugin implements IModPlugin {
 	 * we do not replace it.
 	 */
 	private static List<CraftingRecipe> replaceSpecialCraftingRecipes(List<CraftingRecipe> unhandledCraftingRecipes, IStackHelper stackHelper) {
-		Map<Class<? extends CraftingRecipe>, Supplier<List<CraftingRecipe>>> replacers = new IdentityHashMap<>();
-		replacers.put(TippedArrowRecipe.class, () -> TippedArrowRecipeMaker.createRecipes(stackHelper));
-		replacers.put(ShulkerBoxColoring.class, ShulkerBoxColoringRecipeMaker::createRecipes);
-		replacers.put(SuspiciousStewRecipe.class, SuspiciousStewRecipeMaker::createRecipes);
-		replacers.put(ShieldDecorationRecipe.class, ShieldDecorationRecipeMaker::createRecipes);
-
-		return unhandledCraftingRecipes.stream()
-			.map(CraftingRecipe::getClass)
-			.distinct()
-			.filter(replacers::containsKey)
-			// distinct + this limit will ensure we stop iterating early if we find all the recipes we're looking for.
-			.limit(replacers.size())
-			.flatMap(recipeClass -> {
-				var supplier = replacers.get(recipeClass);
+		List<CraftingRecipe> recipes = new ArrayList<>();
+		boolean tippedArrowRecipesAdded = false;
+		boolean shulkerBoxColoringRecipesAdded = false;
+		boolean suspiciousStewRecipesAdded = false;
+		boolean shieldDecorationRecipesAdded = false;
+		for (CraftingRecipe recipe : unhandledCraftingRecipes) {
+			if (recipe instanceof TippedArrowRecipe && !tippedArrowRecipesAdded) {
 				try {
-					return supplier.get()
-						.stream();
+					recipes.addAll(TippedArrowRecipeMaker.createRecipes(stackHelper));
+					tippedArrowRecipesAdded = true;
 				} catch (RuntimeException e) {
-					LOGGER.error("Failed to create JEI recipes for {}", recipeClass, e);
-					return Stream.of();
+					LOGGER.error("Failed to create JEI recipes for {}", recipe.getClass(), e);
 				}
-			})
-			.toList();
+			} else if (recipe instanceof ShulkerBoxColoring && !shulkerBoxColoringRecipesAdded) {
+				try {
+					recipes.addAll(ShulkerBoxColoringRecipeMaker.createRecipes());
+					shulkerBoxColoringRecipesAdded = true;
+				} catch (RuntimeException e) {
+					LOGGER.error("Failed to create JEI recipes for {}", recipe.getClass(), e);
+				}
+			} else if (recipe instanceof SuspiciousStewRecipe && !suspiciousStewRecipesAdded) {
+				try {
+					recipes.addAll(SuspiciousStewRecipeMaker.createRecipes());
+					suspiciousStewRecipesAdded = true;
+				} catch (RuntimeException e) {
+					LOGGER.error("Failed to create JEI recipes for {}", recipe.getClass(), e);
+				}
+			} else if (recipe instanceof ShieldDecorationRecipe && !shieldDecorationRecipesAdded) {
+				try {
+					recipes.addAll(ShieldDecorationRecipeMaker.createRecipes());
+					shieldDecorationRecipesAdded = true;
+				} catch (RuntimeException e) {
+					LOGGER.error("Failed to create JEI recipes for {}", recipe.getClass(), e);
+				}
+			}
+		}
+		return List.copyOf(recipes);
 	}
 }

@@ -5,10 +5,9 @@ import mezz.jei.api.ingredients.IIngredientType;
 import mezz.jei.api.ingredients.ITypedIngredient;
 import mezz.jei.api.runtime.IBookmarkOverlay;
 import mezz.jei.api.runtime.IScreenHelper;
-import mezz.jei.common.config.HistoryDisplaySide;
 import mezz.jei.common.config.IClientConfig;
 import mezz.jei.common.config.IClientToggleState;
-import mezz.jei.common.config.file.IConfigListener;
+import mezz.jei.common.config.IIngredientGridConfig;
 import mezz.jei.common.input.IInternalKeyMappings;
 import mezz.jei.common.util.ImmutablePoint2i;
 import mezz.jei.common.util.ImmutableRect2i;
@@ -27,8 +26,8 @@ import mezz.jei.gui.input.handlers.CombinedInputHandler;
 import mezz.jei.gui.input.handlers.NullDragHandler;
 import mezz.jei.gui.input.handlers.ProxyDragHandler;
 import mezz.jei.gui.input.handlers.ProxyInputHandler;
-import mezz.jei.gui.overlay.IngredientGridWithNavigation;
-import mezz.jei.gui.overlay.IngredientListSlot;
+import mezz.jei.gui.overlay.ingredients.IngredientGridWithNavigation;
+import mezz.jei.gui.overlay.ingredients.IngredientListSlot;
 import mezz.jei.gui.overlay.ScreenPropertiesCache;
 import mezz.jei.gui.overlay.bookmarks.history.LookupHistoryButton;
 import mezz.jei.gui.overlay.bookmarks.history.LookupHistoryOverlay;
@@ -47,6 +46,8 @@ public class BookmarkOverlay implements IRecipeFocusSource, IBookmarkOverlay {
 	private static final int BORDER_MARGIN = 6;
 	private static final int INNER_PADDING = 2;
 	private static final int BUTTON_SIZE = 20;
+	private static final int LOOKUP_HISTORY_BOTTOM_PADDING = BORDER_MARGIN;
+	private static final int LOOKUP_HISTORY_PADDING_EXTRA = LOOKUP_HISTORY_BOTTOM_PADDING - INNER_PADDING;
 
 	// input
 	private final BookmarkDragManager bookmarkDragManager;
@@ -65,18 +66,13 @@ public class BookmarkOverlay implements IRecipeFocusSource, IBookmarkOverlay {
 	private final IClientToggleState toggleState;
 	private final IClientConfig clientConfig;
 
-	// these need to be stored as strong references here because listeners are weakly stored elsewhere
-	@SuppressWarnings("FieldCanBeLocal")
-	private final IConfigListener<Boolean> lookupHistoryEnabledListener;
-	@SuppressWarnings("FieldCanBeLocal")
-	private final IConfigListener<HistoryDisplaySide> lookupHistoryViewSideListener;
-
 	public BookmarkOverlay(
 		BookmarkList bookmarkList,
 		IngredientGridWithNavigation contents,
 		LookupHistoryOverlay lookupHistoryOverlay,
 		IClientToggleState toggleState,
 		IClientConfig clientConfig,
+		IIngredientGridConfig bookmarkListConfig,
 		IScreenHelper screenHelper,
 		IInternalKeyMappings keyBindings
 	) {
@@ -104,11 +100,10 @@ public class BookmarkOverlay implements IRecipeFocusSource, IBookmarkOverlay {
 				.update();
 		});
 
-		this.lookupHistoryEnabledListener = v -> onScreenPropertiesChanged();
-		this.lookupHistoryViewSideListener = v -> onScreenPropertiesChanged();
-
-		clientConfig.addLookupHistoryEnabledListener(lookupHistoryEnabledListener);
-		clientConfig.addLookupHistoryDisplaySideListener(lookupHistoryViewSideListener);
+		clientConfig.addLookupHistoryEnabledListener(v -> onScreenPropertiesChanged());
+		clientConfig.addLookupHistoryDisplaySideListener(v -> onScreenPropertiesChanged());
+		clientConfig.addMaxLookupHistoryRowsListener(v -> onScreenPropertiesChanged());
+		bookmarkListConfig.addLayoutListener(this::onScreenPropertiesChanged);
 	}
 
 	public boolean isListDisplayed() {
@@ -141,19 +136,23 @@ public class BookmarkOverlay implements IRecipeFocusSource, IBookmarkOverlay {
 
 		ImmutableRect2i availableContentsArea = displayArea.cropBottom(BUTTON_SIZE + INNER_PADDING);
 		if (clientConfig.isLookupHistoryEnabled() && lookupHistoryOverlay.isOnSide()) {
-			int historyRows = clientConfig.getMaxLookupHistoryRows();
-			availableContentsArea = availableContentsArea.cropBottom(historyRows * LookupHistoryOverlay.SLOT_HEIGHT);
-			ImmutableRect2i historyArea = displayArea
-				.insetBy(BORDER_MARGIN)
-				.moveUp(BUTTON_SIZE + INNER_PADDING)
-				.keepBottom(historyRows * LookupHistoryOverlay.SLOT_HEIGHT);
-			this.lookupHistoryOverlay.updateBounds(historyArea, guiExclusionAreas, mouseExclusionArea);
-			this.lookupHistoryOverlay.updateLayout();
+			int historyHeight = lookupHistoryOverlay.getDisplayHeight();
+			if (historyHeight > 0) {
+				ImmutableRect2i historyArea = displayArea
+					.insetBy(BORDER_MARGIN)
+					.cropBottom(BUTTON_SIZE + LOOKUP_HISTORY_BOTTOM_PADDING)
+					.keepBottom(historyHeight);
+				availableContentsArea = cropBottomTo(
+					availableContentsArea,
+					historyArea.y() - LOOKUP_HISTORY_PADDING_EXTRA
+				);
+				this.lookupHistoryOverlay.updateBounds(historyArea, guiExclusionAreas, mouseExclusionArea);
+				this.lookupHistoryOverlay.updateLayout();
+			}
 		}
-		int legacySize = contents.size();
+		IElement<?> pageAnchorElement = this.contents.getPageAnchorElement();
 		this.contents.updateBounds(availableContentsArea, guiExclusionAreas, mouseExclusionArea);
-		boolean resetToFirstPage = legacySize != contents.size();
-		this.contents.updateLayout(resetToFirstPage);
+		this.contents.updateLayoutKeepingPageAnchorVisible(pageAnchorElement);
 
 		if (contents.hasRoom()) {
 			ImmutableRect2i contentsArea = this.contents.getBackgroundArea();
@@ -185,6 +184,18 @@ public class BookmarkOverlay implements IRecipeFocusSource, IBookmarkOverlay {
 		return new ImmutableRect2i(0, 0, width, screenHeight);
 	}
 
+	private static ImmutableRect2i cropBottomTo(ImmutableRect2i area, int bottomY) {
+		int cropAmount = getBottom(area) - bottomY;
+		if (cropAmount <= 0) {
+			return area;
+		}
+		return area.cropBottom(cropAmount);
+	}
+
+	private static int getBottom(ImmutableRect2i area) {
+		return area.y() + area.height();
+	}
+
 	public void drawScreen(Minecraft minecraft, GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
 		if (isListDisplayed()) {
 			this.bookmarkDragManager.updateDrag(mouseX, mouseY);
@@ -211,6 +222,15 @@ public class BookmarkOverlay implements IRecipeFocusSource, IBookmarkOverlay {
 		if (this.screenPropertiesCache.hasValidScreen()) {
 			bookmarkButton.drawTooltips(guiGraphics, mouseX, mouseY);
 			historyButton.drawTooltips(guiGraphics, mouseX, mouseY);
+		}
+	}
+
+	public void tick() {
+		if (isListDisplayed()) {
+			this.contents.tick();
+		}
+		if (screenPropertiesCache.hasValidScreen() && toggleState.isOverlayEnabled()) {
+			this.lookupHistoryOverlay.tick();
 		}
 	}
 

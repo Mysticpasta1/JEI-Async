@@ -1,5 +1,6 @@
 package mezz.jei.api.registration;
 
+import mezz.jei.api.IModPlugin;
 import mezz.jei.api.helpers.IJeiHelpers;
 import mezz.jei.api.recipe.IRecipeManager;
 import mezz.jei.api.recipe.transfer.IRecipeTransferManager;
@@ -11,6 +12,8 @@ import mezz.jei.api.runtime.IIngredientManager;
 import mezz.jei.api.runtime.IIngredientVisibility;
 import mezz.jei.api.runtime.IRecipesGui;
 import mezz.jei.api.runtime.IScreenHelper;
+import mezz.jei.api.search.ISearchStorageBuilderFactory;
+import mezz.jei.api.search.ISearchStorageFactory;
 import org.jetbrains.annotations.ApiStatus;
 
 import java.util.List;
@@ -21,6 +24,7 @@ import java.util.Optional;
  *
  * @since 12.0.2
  */
+@ApiStatus.NonExtendable
 public interface IRuntimeRegistration {
 	/**
 	 * Set the ingredient list overlay.
@@ -106,4 +110,24 @@ public interface IRuntimeRegistration {
 	default Optional<List<?>> getInternalIngredientList() {
 		return Optional.empty();
 	}
+
+	/**
+	 * Get the search storage factory used by JEI's ingredient filter.
+	 * This can be overridden for advanced search behavior with
+	 * {@link IModPlugin#registerAdvancedSearch(IAdvancedSearchRegistration)} and
+	 * {@link IAdvancedSearchRegistration#replaceSearchStorage}.
+	 *
+	 * @since 15.22.0
+	 */
+	ISearchStorageFactory getSearchStorageFactory();
+
+	/**
+	 * Get the search storage builder factory used by JEI's ingredient filter.
+	 * This can be overridden for advanced search behavior with
+	 * {@link IModPlugin#registerAdvancedSearch(IAdvancedSearchRegistration)} and
+	 * {@link IAdvancedSearchRegistration#replaceSearchStorage(ISearchStorageBuilderFactory)}.
+	 *
+	 * @since 15.23.0
+	 */
+	ISearchStorageBuilderFactory getSearchStorageBuilderFactory();
 }

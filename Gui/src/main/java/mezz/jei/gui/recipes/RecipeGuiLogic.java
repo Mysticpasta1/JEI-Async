@@ -25,9 +25,7 @@ import mezz.jei.gui.recipes.lookups.IFocusedRecipes;
 import mezz.jei.gui.recipes.lookups.ILookupState;
 import mezz.jei.gui.recipes.lookups.IngredientLookupState;
 import mezz.jei.gui.recipes.lookups.SingleCategoryLookupState;
-import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.Rect2i;
-import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -52,6 +50,7 @@ public class RecipeGuiLogic implements IRecipeGuiLogic {
 	private final IRecipeLayoutWithButtonsFactory recipeLayoutFactory;
 	private @Nullable IRecipeCategory<?> cachedRecipeCategory;
 	private @Nullable IRecipeLayoutList cachedRecipeLayoutsWithButtons;
+	private int cachedContainerId = -1;
 	private Set<RecipeSorterStage> cachedSorterStages = Set.of();
 
 	public RecipeGuiLogic(
@@ -82,9 +81,9 @@ public class RecipeGuiLogic implements IRecipeGuiLogic {
 	}
 
 	@Override
-	public void tick() {
+	public void tick(@Nullable AbstractContainerMenu container) {
 		if (cachedRecipeLayoutsWithButtons != null) {
-			cachedRecipeLayoutsWithButtons.tick();
+			cachedRecipeLayoutsWithButtons.tick(container);
 		}
 	}
 
@@ -171,6 +170,7 @@ public class RecipeGuiLogic implements IRecipeGuiLogic {
 		this.initialState = false;
 		this.cachedRecipeCategory = null;
 		this.cachedRecipeLayoutsWithButtons = null;
+		this.cachedContainerId = -1;
 		stateListener.onStateChange();
 		return true;
 	}
@@ -241,33 +241,34 @@ public class RecipeGuiLogic implements IRecipeGuiLogic {
 	}
 
 	@Override
-	public List<RecipeLayoutWithButtons<?>> getVisibleRecipeLayoutsWithButtons(
+	public List<IRecipeLayoutWithButtons<?>> getVisibleRecipeLayoutsWithButtons(
 		int availableHeight,
 		int minRecipePadding,
 		@Nullable AbstractContainerMenu container
 	) {
-		Player player = Minecraft.getInstance().player;
-
 		IRecipeCategory<?> recipeCategory = getSelectedRecipeCategory();
 
 		IJeiClientConfigs jeiClientConfigs = Internal.getJeiClientConfigs();
 		IClientConfig clientConfig = jeiClientConfigs.getClientConfig();
 		Set<RecipeSorterStage> recipeSorterStages = clientConfig.getRecipeSorterStages();
 
+		int containerId = container == null ? -1 : container.containerId;
 		if (!recipeSorterStages.equals(cachedSorterStages) ||
 			this.cachedRecipeLayoutsWithButtons == null ||
-			this.cachedRecipeCategory != recipeCategory
+			this.cachedRecipeCategory != recipeCategory ||
+			this.cachedContainerId != containerId
 		) {
 			IFocusedRecipes<?> focusedRecipes = this.state.getFocusedRecipes();
 
-			this.cachedRecipeLayoutsWithButtons = createRecipeLayoutsWithButtons(recipeSorterStages, focusedRecipes, container, player);
+			this.cachedRecipeLayoutsWithButtons = createRecipeLayoutsWithButtons(recipeSorterStages, focusedRecipes);
 			this.cachedRecipeCategory = recipeCategory;
 			this.cachedSorterStages = Set.copyOf(recipeSorterStages);
+			this.cachedContainerId = containerId;
 		}
 
 		final int recipeHeight =
-			this.cachedRecipeLayoutsWithButtons.findFirst()
-				.map(RecipeLayoutWithButtons::recipeLayout)
+			this.cachedRecipeLayoutsWithButtons.findFirst(container)
+				.map(IRecipeLayoutWithButtons::getRecipeLayout)
 				.map(IRecipeLayoutDrawable::getRectWithBorder)
 				.map(Rect2i::getHeight)
 				.orElseGet(recipeCategory::getHeight);
@@ -275,7 +276,7 @@ public class RecipeGuiLogic implements IRecipeGuiLogic {
 		final int recipesPerPage = Math.max(1, 1 + ((availableHeight - recipeHeight) / (recipeHeight + minRecipePadding)));
 		this.state.setRecipesPerPage(recipesPerPage);
 
-		return this.state.getVisible(this.cachedRecipeLayoutsWithButtons);
+		return this.state.getVisible(this.cachedRecipeLayoutsWithButtons, container);
 	}
 
 	@Override
@@ -286,15 +287,13 @@ public class RecipeGuiLogic implements IRecipeGuiLogic {
 	@Unmodifiable
 	private <T> IRecipeLayoutList createRecipeLayoutsWithButtons(
 		Set<RecipeSorterStage> recipeSorterStages,
-		IFocusedRecipes<T> selectedRecipes,
-		@Nullable AbstractContainerMenu container,
-		@Nullable Player player
+		IFocusedRecipes<T> selectedRecipes
 	) {
 		IRecipeCategory<T> recipeCategory = selectedRecipes.getRecipeCategory();
 		List<T> recipes = selectedRecipes.getRecipes();
 		List<T> brokenRecipes = new ArrayList<>();
 
-		List<RecipeLayoutWithButtons<T>> results = recipes.stream()
+		List<IRecipeLayoutWithButtons<T>> results = recipes.stream()
 			.map(recipe -> {
 				DrawableNineSliceTexture recipeBackground = Internal.getTextures().getRecipeBackground();
 				return recipeManager.createRecipeLayoutDrawable(recipeCategory, recipe, state.getFocuses(), recipeBackground, 4)
@@ -311,7 +310,7 @@ public class RecipeGuiLogic implements IRecipeGuiLogic {
 			recipeManager.hideRecipes(recipeType, brokenRecipes);
 		}
 
-		return IRecipeLayoutList.create(recipeSorterStages, container, player, results);
+		return IRecipeLayoutList.create(recipeSorterStages, results);
 	}
 
 	@Override

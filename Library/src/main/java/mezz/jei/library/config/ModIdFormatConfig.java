@@ -3,16 +3,10 @@ package mezz.jei.library.config;
 import mezz.jei.api.constants.ModIds;
 import mezz.jei.common.config.file.IConfigCategoryBuilder;
 import mezz.jei.common.config.file.IConfigSchemaBuilder;
-import mezz.jei.common.platform.IPlatformItemStackHelper;
-import mezz.jei.common.platform.Services;
 import mezz.jei.core.util.function.CachedSupplierTransformer;
 import mezz.jei.library.config.serializers.ChatFormattingSerializer;
 import net.minecraft.ChatFormatting;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.Component;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
 import org.apache.commons.lang3.StringUtils;
 import org.jetbrains.annotations.Nullable;
 
@@ -47,7 +41,7 @@ public class ModIdFormatConfig implements IModIdFormatConfig {
 
 	private String getOverride() {
 		if (cachedOverride == null) {
-			cachedOverride = detectModNameTooltipFormatting();
+			cachedOverride = ModIdFormatDetectionHelper.detectModNameTooltipFormatting();
 		}
 		return cachedOverride;
 	}
@@ -66,11 +60,7 @@ public class ModIdFormatConfig implements IModIdFormatConfig {
 		return !getOverride().isEmpty();
 	}
 
-	private String detectModNameTooltipFormatting() {
-		IPlatformItemStackHelper itemStackHelper = Services.PLATFORM.getItemStackHelper();
-		Minecraft minecraft = Minecraft.getInstance();
-		LocalPlayer player = minecraft.player;
-		List<Component> tooltip = itemStackHelper.getTestTooltip(player, new ItemStack(Items.APPLE));
+	public static String detectModNameTooltipFormatting(List<Component> tooltip) {
 		if (tooltip.size() <= 1) {
 			return "";
 		}

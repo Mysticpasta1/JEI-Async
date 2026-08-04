@@ -142,20 +142,19 @@ public final class RecipeTransferUtil {
 			}
 		}
 
-		// check that all slots can be picked up by the player
+		// check that all slots are interactable (can be picked up, and not output slots)
 		{
-			List<Integer> invalidPickupSlots = Stream.concat(
+			List<Integer> invalidModificationSlots = Stream.concat(
 					craftingSlots.stream(),
 					inventorySlots.stream()
 				)
-				.filter(Slot::hasItem)
-				.filter(slot -> !slot.mayPickup(player))
+				.filter(s -> !s.allowModification(player))
 				.map(slot -> slot.index)
 				.toList();
-			if (!invalidPickupSlots.isEmpty()) {
+			if (!invalidModificationSlots.isEmpty()) {
 				LOGGER.error(
-					"Transfer request has invalid slots, the player is unable to pickup from them: {}",
-					StringUtil.intsToString(invalidPickupSlots)
+					"Transfer request has invalid slots, they do not allow modification: {}",
+					StringUtil.intsToString(invalidModificationSlots)
 				);
 				return false;
 			}
@@ -187,12 +186,12 @@ public final class RecipeTransferUtil {
 
 		for (Map.Entry<Slot, ItemStack> slotTuple : availableItemStacks.entrySet()) {
 			ItemStack slotItemStack = slotTuple.getValue();
-			String slotItemStackUid = stackhelper.getUniqueIdentifierForStack(slotItemStack, UidContext.Ingredient);
+			String slotItemStackUid = stackhelper.getUniqueIdentifierForStack(slotItemStack, UidContext.Recipe);
 
 			for (IRecipeSlotView ingredient : nonEmptyRequiredStacks) {
 				Set<String> ingredientUids = slotUidCache.computeIfAbsent(ingredient, s ->
 					s.getItemStacks()
-					.map(i -> stackhelper.getUniqueIdentifierForStack(i, UidContext.Ingredient))
+					.map(i -> stackhelper.getUniqueIdentifierForStack(i, UidContext.Recipe))
 					.collect(Collectors.toSet())
 				);
 
@@ -206,7 +205,7 @@ public final class RecipeTransferUtil {
 
 							@Override
 							public boolean equals(ItemStack a, ItemStack b) {
-								return stackhelper.isEquivalent(a, b, UidContext.Ingredient);
+								return stackhelper.isEquivalent(a, b, UidContext.Recipe);
 							}
 						}))
 						.computeIfAbsent(slotItemStack, it -> new ArrayList<>())

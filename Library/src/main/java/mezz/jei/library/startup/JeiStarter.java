@@ -3,7 +3,7 @@ package mezz.jei.library.startup;
 import mezz.jei.api.IModPlugin;
 import mezz.jei.api.helpers.IColorHelper;
 import mezz.jei.api.recipe.transfer.IRecipeTransferManager;
-import mezz.jei.api.runtime.IIngredientManager;
+import mezz.jei.api.search.ISearchStorageBuilderFactory;
 import mezz.jei.api.runtime.IScreenHelper;
 import mezz.jei.common.Internal;
 import mezz.jei.common.config.ConfigManager;
@@ -13,9 +13,14 @@ import mezz.jei.common.config.JeiClientConfigs;
 import mezz.jei.common.config.file.ConfigSchemaBuilder;
 import mezz.jei.common.config.file.FileWatcher;
 import mezz.jei.common.config.file.IConfigSchemaBuilder;
+import mezz.jei.common.network.ClientConnectionHelper;
+import mezz.jei.common.network.IConnectionToServer;
 import mezz.jei.common.platform.Services;
+import mezz.jei.common.recipes.VanillaClientRecipeLoader;
+import mezz.jei.common.util.ChatUtil;
 import mezz.jei.common.util.ErrorUtil;
 import mezz.jei.common.util.RegistryUtil;
+import mezz.jei.common.util.Translator;
 import mezz.jei.core.util.LoggedTimer;
 import mezz.jei.library.color.ColorHelper;
 import mezz.jei.library.config.ColorNameConfig;
@@ -25,6 +30,7 @@ import mezz.jei.library.config.ModIdFormatConfig;
 import mezz.jei.library.config.RecipeCategorySortingConfig;
 import mezz.jei.library.ingredients.itemStacks.TypedItemStack;
 import mezz.jei.library.focus.FocusFactory;
+import mezz.jei.library.ingredients.IngredientManager;
 import mezz.jei.library.ingredients.subtypes.SubtypeManager;
 import mezz.jei.library.load.IncompatiblePluginStore;
 import mezz.jei.library.load.LoadingState;
@@ -40,15 +46,21 @@ import mezz.jei.library.runtime.JeiHelpers;
 import mezz.jei.library.runtime.JeiRuntime;
 import mezz.jei.library.runtime.DelegatingJeiHelpers;
 import mezz.jei.library.gui.helpers.ScreenHelper;
+import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.core.RegistryAccess;
+import net.minecraft.network.chat.Component;
 import net.minecraft.sounds.SoundEvents;
+import net.minecraft.world.item.crafting.Recipe;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.Nullable;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -71,7 +83,8 @@ public final class JeiStarter {
 		}
 		return loadingExecutor;
 	}
-	private static final String EXPECTED_VERSION = "15.20.0.130-async-32"; // Current JEI-Async version
+	private static final String EXPECTED_VERSION = "15.32.0-async-33"; // Current JEI-Async version
+	private static final String VANILLA_SERVER_BRAND = "vanilla";
 
 	private final StartData data;
 	private final List<IModPlugin> plugins;
@@ -91,6 +104,8 @@ public final class JeiStarter {
 	private volatile LoadingState loadingState = LoadingState.NOT_STARTED;
 	private final DelegatingJeiHelpers delegatingJeiHelpers = new DelegatingJeiHelpers(null);
 	private final DelegatingRecipeManager delegatingRecipeManager = new DelegatingRecipeManager();
+	private final List<IStopCallback> stopCallbacks = new ArrayList<>();
+	private volatile boolean running = false;
 
 	public JeiStarter(StartData data) {
 		if (Services.PLATFORM.getModHelper().isModLoaded("emi")) {
@@ -156,10 +171,23 @@ public final class JeiStarter {
 	}
 
 	public void start() {
+		if (running) {
+			LOGGER.error("Failed to start JEI, it is already running.");
+			return;
+		}
+
 		Minecraft minecraft = Minecraft.getInstance();
-		if (minecraft.level == null) {
+		ClientLevel level = minecraft.level;
+		if (level == null) {
 			LOGGER.error("Failed to start JEI, there is no Minecraft client level.");
 			return;
+		}
+		if (!Internal.hasClientRecipes()) {
+			List<Recipe<?>> vanillaRecipes = VanillaClientRecipeLoader.getVanillaRecipes();
+			if (!vanillaRecipes.isEmpty()) {
+				Internal.setClientFallbackRecipes(vanillaRecipes);
+				level.getRecipeManager().replaceRecipes(vanillaRecipes);
+			}
 		}
 
 		// Prevent concurrent loading
@@ -224,9 +252,11 @@ public final class JeiStarter {
 
 		PluginCaller.callPlugins("Sending Runtime", plugins, p -> p.onRuntimeAvailable(jeiRuntime), false, incompatiblePluginStore);
 		Internal.setRuntime(jeiRuntime);
+		this.running = true;
 
 		totalTime.stop();
 		playLoadCompleteSound();
+		verifyClientRecipes(Minecraft.getInstance());
 	}
 
 	private void doLoadingAsync() {
@@ -253,9 +283,11 @@ public final class JeiStarter {
 				return;
 			}
 			Internal.setRuntime(jeiRuntime);
+			this.running = true;
 			Internal.setLoadingProgress(null);
 			LOGGER.info("JEI has finished background loading and is now available.");
 			playLoadCompleteSound();
+			verifyClientRecipes(Minecraft.getInstance());
 			// Dispatch onRuntimeAvailable non-blocking to avoid blocking the main thread.
 			// Sync-only plugins get dispatched via execute() so they run in a future tick,
 			// keeping the current frame responsive.
@@ -278,6 +310,8 @@ public final class JeiStarter {
 	}
 
 	private JeiRuntime buildRuntime(boolean useAsyncFallback, @Nullable Consumer<Runnable> mainThreadRunner) {
+		PluginCaller.callOnPlugins("Configuring JEI", plugins, p -> p.configureJei(new PluginAwareJeiFeatures(Internal.getJeiFeatures(), p)));
+
 		loadingState = LoadingState.LOADING_SUBTYPES;
 		if (!hidden) {
 			Internal.setLoadingProgress("Loading subtypes...");
@@ -294,7 +328,8 @@ public final class JeiStarter {
 		if (!hidden) {
 			Internal.setLoadingProgress("Loading ingredients...");
 		}
-		IIngredientManager ingredientManager = PluginLoader.registerIngredients(data, subtypeManager, colorHelper, ingredientFilterConfig, useAsyncFallback, incompatiblePluginStore, mainThreadRunner);
+		IngredientManager ingredientManager = PluginLoader.registerIngredients(data, subtypeManager, colorHelper, ingredientFilterConfig, useAsyncFallback, incompatiblePluginStore, mainThreadRunner);
+		stopCallbacks.add(ingredientManager::onRuntimeStopped);
 
 		if (cancelled) {
 			throw new CancelledException();
@@ -305,7 +340,8 @@ public final class JeiStarter {
 		Path configDir = Services.PLATFORM.getConfigHelper().createJeiConfigDir();
 		EditModeConfig editModeConfig = new EditModeConfig(new EditModeConfig.FileSerializer(configDir.resolve("blacklist.cfg")), ingredientManager);
 
-		JeiHelpers jeiHelpers = PluginLoader.createJeiHelpers(modIdFormatConfig, colorHelper, editModeConfig, focusFactory, ingredientManager, subtypeManager);
+		JeiHelpers jeiHelpers = PluginLoader.createJeiHelpers(plugins, modIdFormatConfig, colorHelper, editModeConfig, focusFactory, ingredientManager, subtypeManager);
+		stopCallbacks.add(jeiHelpers::onRuntimeStopped);
 		delegatingJeiHelpers.setDelegate(jeiHelpers);
 		// Publish the helpers now, not with the runtime: recipe category and layout code below runs on
 		// the background loader and needs the gui helper / ingredient manager long before the runtime
@@ -351,6 +387,7 @@ public final class JeiStarter {
 		LoggedTimer timer = new LoggedTimer();
 		timer.start("Building runtime");
 		IScreenHelper screenHelper = PluginLoader.createGuiScreenHelper(plugins, delegatingJeiHelpers, ingredientManager, incompatiblePluginStore, mainThreadRunner);
+		ISearchStorageBuilderFactory searchStorageBuilderFactory = PluginLoader.createSearchStorageFactory(plugins);
 
 		RuntimeRegistration runtimeRegistration = new RuntimeRegistration(
 				recipeManager,
@@ -358,7 +395,8 @@ public final class JeiStarter {
 				editModeConfig,
 				ingredientManager,
 				recipeTransferManager,
-				screenHelper
+				screenHelper,
+				searchStorageBuilderFactory
 		);
 
 		PluginCaller.callPlugins("Registering Runtime", plugins, p -> p.registerRuntime(runtimeRegistration), useAsyncFallback, incompatiblePluginStore, mainThreadRunner);
@@ -397,7 +435,50 @@ public final class JeiStarter {
 		return isStarting;
 	}
 
+	private void verifyClientRecipes(Minecraft minecraft) {
+		IConnectionToServer serverConnection = data.serverConnection();
+		List<Recipe<?>> clientRecipes = Internal.getClientSyncedRecipes();
+
+		if (Internal.hasClientSyncedRecipes() && clientRecipes.isEmpty()) {
+			String key = "jei.message.server.recipe.sync.error";
+			writeChatMessage(minecraft, Component.translatable(key).withStyle(ChatFormatting.RED));
+			LOGGER.error(Translator.translateToLocal(key));
+		} else if (Internal.hasClientFallbackRecipes()) {
+			if (!serverConnection.isJeiOnServer() &&
+				serverConnection.isSameModLoader())
+			{
+				String key = "jei.message.server.recipe.sync.jei.missing";
+				String serverBrand = ClientConnectionHelper.getServerBrand();
+				writeChatMessage(minecraft, Component.translatable(key, serverBrand).withStyle(ChatFormatting.RED));
+				LOGGER.warn(Translator.translateToLocalFormatted(key, serverBrand));
+			} else if (ClientConnectionHelper.hasServerBrand(VANILLA_SERVER_BRAND)) {
+				String key = "jei.message.server.recipe.sync.vanilla";
+				writeChatMessage(minecraft, Component.translatable(key).withStyle(ChatFormatting.YELLOW));
+				LOGGER.warn(Translator.translateToLocal(key));
+			} else {
+				String key = "jei.message.server.recipe.sync.unavailable";
+				String serverBrand = ClientConnectionHelper.getServerBrand();
+				writeChatMessage(minecraft, Component.translatable(key, serverBrand).withStyle(ChatFormatting.RED));
+				LOGGER.warn(Translator.translateToLocalFormatted(key, serverBrand));
+			}
+		}
+	}
+
+	private static void writeChatMessage(Minecraft minecraft, Component component) {
+		LocalPlayer player = minecraft.player;
+		if (player != null) {
+			ChatUtil.writeChatMessage(player, component);
+		}
+	}
+
 	public void stop() {
+		// isStarting is also checked so that a background load still in flight can be cancelled,
+		// which happens before `running` is ever set.
+		if (!running && !isStarting) {
+			return;
+		}
+		this.running = false;
+
 		LOGGER.info("Stopping JEI");
 		cancelled = true;
 		loadingState = LoadingState.NOT_STARTED;
@@ -434,7 +515,14 @@ public final class JeiStarter {
 			}
 		});
 
-		Internal.setRuntime(null);
+		// Clears the runtime, closes the recipes gui, and drops config/connection listeners.
+		Internal.onRuntimeStopped();
+
+		for (IStopCallback stopCallback : stopCallbacks) {
+			stopCallback.onRuntimeStopped();
+		}
+		stopCallbacks.clear();
+
 		RegistryUtil.setRegistryAccess(null);
 
 		// Release references to old runtime data to prevent memory leaks

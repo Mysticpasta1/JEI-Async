@@ -138,7 +138,7 @@ public class JeiTooltip implements ITooltipBuilder {
 		try {
 			renderHelper.renderTooltip(guiGraphics, lines, x, y, font, ItemStack.EMPTY);
 		} catch (RuntimeException e) {
-			throw new RuntimeException("Crashed when rendering tooltip:\n" + this);
+			throw new RuntimeException("Crashed when rendering tooltip:\n" + this, e);
 		}
 	}
 
@@ -170,11 +170,8 @@ public class JeiTooltip implements ITooltipBuilder {
 
 		itemStack.getTooltipImage()
 			.ifPresent((c) -> {
-				if (lines.size() > 1) {
-					lines.add(1, Either.right(c));
-				} else {
-					lines.add(Either.right(c));
-				}
+				int index = Math.min(1, lines.size());
+				lines.add(index, Either.right(c));
 			});
 
 		addDebugInfo(ingredientManager, typedIngredient);

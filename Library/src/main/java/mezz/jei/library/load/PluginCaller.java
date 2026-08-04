@@ -90,6 +90,10 @@ public class PluginCaller {
 		}
 	}
 
+	public static void callOnPlugins(String title, List<IModPlugin> plugins, Consumer<IModPlugin> func) {
+		callOnPlugins(title, plugins, func, (Consumer<Runnable>) null, null);
+	}
+
 	public static void callOnPlugins(String title, List<IModPlugin> plugins, Consumer<IModPlugin> func, @Nullable Consumer<Runnable> mainThreadRunner, @Nullable IncompatiblePluginStore store) {
 		callOnPlugins(title, plugins, func,
 			mainThreadRunner != null ? p -> mainThreadRunner : p -> null,

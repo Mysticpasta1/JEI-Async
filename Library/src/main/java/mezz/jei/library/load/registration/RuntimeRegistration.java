@@ -11,10 +11,14 @@ import mezz.jei.api.runtime.IIngredientListOverlay;
 import mezz.jei.api.runtime.IIngredientManager;
 import mezz.jei.api.runtime.IRecipesGui;
 import mezz.jei.api.runtime.IScreenHelper;
+import mezz.jei.api.search.ISearchStorage;
+import mezz.jei.api.search.ISearchStorageBuilderFactory;
+import mezz.jei.api.search.ISearchStorageFactory;
 import mezz.jei.library.gui.BookmarkOverlayDummy;
 import mezz.jei.library.gui.IngredientListOverlayDummy;
 import mezz.jei.library.gui.recipes.RecipesGuiDummy;
 import mezz.jei.library.ingredients.IngredientFilterApiDummy;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
 import java.util.Optional;
@@ -26,6 +30,8 @@ public class RuntimeRegistration implements IRuntimeRegistration {
 	private final IIngredientManager ingredientManager;
 	private final IRecipeTransferManager recipeTransferManager;
 	private final IScreenHelper screenHelper;
+	private final ISearchStorageBuilderFactory searchStorageBuilderFactory;
+	@Nullable
 	private final List<?> ingredientList;
 
 	private IIngredientListOverlay ingredientListOverlay = IngredientListOverlayDummy.INSTANCE;
@@ -39,9 +45,10 @@ public class RuntimeRegistration implements IRuntimeRegistration {
 		IEditModeConfig editModeConfig,
 		IIngredientManager ingredientManager,
 		IRecipeTransferManager recipeTransferManager,
-		IScreenHelper screenHelper
+		IScreenHelper screenHelper,
+		ISearchStorageBuilderFactory searchStorageBuilderFactory
 	) {
-		this(recipeManager, jeiHelpers, editModeConfig, ingredientManager, recipeTransferManager, screenHelper, null);
+		this(recipeManager, jeiHelpers, editModeConfig, ingredientManager, recipeTransferManager, screenHelper, searchStorageBuilderFactory, null);
 	}
 
 	public RuntimeRegistration(
@@ -51,7 +58,8 @@ public class RuntimeRegistration implements IRuntimeRegistration {
 		IIngredientManager ingredientManager,
 		IRecipeTransferManager recipeTransferManager,
 		IScreenHelper screenHelper,
-		List<?> ingredientList
+		ISearchStorageBuilderFactory searchStorageBuilderFactory,
+		@Nullable List<?> ingredientList
 	) {
 		this.recipeManager = recipeManager;
 		this.jeiHelpers = jeiHelpers;
@@ -59,6 +67,7 @@ public class RuntimeRegistration implements IRuntimeRegistration {
 		this.ingredientManager = ingredientManager;
 		this.recipeTransferManager = recipeTransferManager;
 		this.screenHelper = screenHelper;
+		this.searchStorageBuilderFactory = searchStorageBuilderFactory;
 		this.ingredientList = ingredientList;
 	}
 
@@ -110,6 +119,22 @@ public class RuntimeRegistration implements IRuntimeRegistration {
 	@Override
 	public IEditModeConfig getEditModeConfig() {
 		return this.editModeConfig;
+	}
+
+	@SuppressWarnings("removal")
+	@Override
+	public ISearchStorageFactory getSearchStorageFactory() {
+		return new ISearchStorageFactory() {
+			@Override
+			public <T> ISearchStorage<T> createSearchStorage() {
+				return searchStorageBuilderFactory.<T>create().build();
+			}
+		};
+	}
+
+	@Override
+	public ISearchStorageBuilderFactory getSearchStorageBuilderFactory() {
+		return searchStorageBuilderFactory;
 	}
 
 	public IIngredientListOverlay getIngredientListOverlay() {

@@ -4,8 +4,13 @@ import mezz.jei.api.ingredients.IIngredientHelper;
 import mezz.jei.api.ingredients.ITypedIngredient;
 import mezz.jei.api.ingredients.subtypes.UidContext;
 import mezz.jei.api.runtime.IIngredientManager;
-import mezz.jei.common.config.DebugConfig;
-import mezz.jei.core.search.*;
+import mezz.jei.api.search.ISearchStorage;
+import mezz.jei.api.search.ISearchStorageBuilder;
+import mezz.jei.core.search.CombinedSearchables;
+import mezz.jei.core.search.ISearchable;
+import mezz.jei.core.search.PrefixInfo;
+import mezz.jei.core.search.PrefixedSearchable;
+import mezz.jei.core.search.SearchMode;
 import mezz.jei.gui.ingredients.IListElement;
 import mezz.jei.gui.ingredients.IListElementInfo;
 import net.minecraft.client.Minecraft;
@@ -14,6 +19,7 @@ import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.IdentityHashMap;
@@ -22,19 +28,21 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.IntStream;
 
 public class ElementSearch implements IElementSearch {
 	private static final Logger LOGGER = LogManager.getLogger();
-
-	private final Map<PrefixInfo<IListElementInfo<?>, IListElement<?>>, PrefixedSearchable<IListElementInfo<?>, IListElement<?>>> prefixedSearchables = new IdentityHashMap<>();
-	private final CombinedSearchables<IListElement<?>> combinedSearchables = new CombinedSearchables<>();
-	private final Map<Object, IListElement<?>> allElements = new ConcurrentHashMap<>();
 
 	/**
 	 * Prefix whose strings can only be derived on the render thread, because generating a tooltip
 	 * fires mod tooltip events that are not safe off-thread.
 	 */
 	private static final char TOOLTIP_PREFIX = '#';
+
+	private final Map<PrefixInfo<IListElementInfo<?>, IListElement<?>>, PrefixedSearchable<IListElementInfo<?>, IListElement<?>>> prefixedSearchables = new IdentityHashMap<>();
+	private final CombinedSearchables<IListElement<?>> combinedSearchables = new CombinedSearchables<>();
+	private final Map<Object, IListElement<?>> allElements = new ConcurrentHashMap<>();
+	private final PrefixInfo<IListElementInfo<?>, IListElement<?>> noPrefix;
 
 	/** An ingredient whose tooltip strings still have to be derived on the render thread. */
 	private record DeferredTooltip(IListElementInfo<?> info, String uid) {}
@@ -46,16 +54,92 @@ public class ElementSearch implements IElementSearch {
 	@Nullable
 	private volatile SearchStringCache searchStringCache = null;
 
-	public ElementSearch(ElementPrefixParser elementPrefixParser) {
+	public ElementSearch(
+		ElementPrefixParser elementPrefixParser,
+		Collection<IListElementInfo<?>> infos,
+		IIngredientManager ingredientManager
+	) {
+		this(elementPrefixParser, infos, ingredientManager, null);
+	}
+
+	public ElementSearch(
+		ElementPrefixParser elementPrefixParser,
+		Collection<IListElementInfo<?>> infos,
+		IIngredientManager ingredientManager,
+		@Nullable SearchStringCache searchStringCache
+	) {
+		this.noPrefix = elementPrefixParser.getNoPrefix();
+		this.searchStringCache = searchStringCache;
+
+		boolean backgroundThread = isBackgroundThread();
+		List<IListElementInfo<?>> ordered = infos instanceof List<IListElementInfo<?>> list ? list : new ArrayList<>(infos);
+		List<String> uids = registerElements(ordered, ingredientManager, backgroundThread);
+
 		for (PrefixInfo<IListElementInfo<?>, IListElement<?>> prefixInfo : elementPrefixParser.allPrefixInfos()) {
-			ISearchStorage<IListElement<?>> storage = prefixInfo.createStorage();
-			var prefixedSearchable = new PrefixedSearchable<>(storage, prefixInfo);
+			ISearchStorageBuilder<IListElement<?>> storageBuilder = prefixInfo.createStorageBuilder();
+			char prefix = prefixInfo.getPrefix();
+			List<DeferredTooltip> deferred = new ArrayList<>();
+
+			if (prefixInfo.getMode() != SearchMode.DISABLED) {
+				// Note: getStrings() can generate tooltips, which fires mod tooltip events and touches
+				// Minecraft thread-local state, so it must stay on the calling thread.
+				for (int i = 0; i < ordered.size(); i++) {
+					IListElementInfo<?> info = ordered.get(i);
+					String uidString = uids.get(i);
+					IListElement<?> element = info.getElement();
+
+					List<String> cached = getCachedStrings(uidString, prefix);
+					if (cached != null) {
+						for (String string : cached) {
+							putIfNotBlank(storageBuilder, string, element);
+						}
+						continue;
+					}
+					if (backgroundThread && prefix == TOOLTIP_PREFIX) {
+						// Tooltip generation must happen on the render thread; defer it so it is
+						// still indexed later instead of being dropped.
+						deferred.add(new DeferredTooltip(info, uidString));
+						continue;
+					}
+					Collection<String> strings = prefixInfo.getStrings(info);
+					for (String string : strings) {
+						putIfNotBlank(storageBuilder, string, element);
+					}
+					recordStrings(uidString, prefix, strings);
+				}
+			}
+
+			ISearchStorage<IListElement<?>> searchStorage = storageBuilder.build();
+			var prefixedSearchable = new PrefixedSearchable<>(searchStorage, prefixInfo);
 			this.prefixedSearchables.put(prefixInfo, prefixedSearchable);
 			this.combinedSearchables.addSearchable(prefixedSearchable);
-			if (prefixInfo.getPrefix() == TOOLTIP_PREFIX) {
+			if (prefix == TOOLTIP_PREFIX) {
 				this.tooltipSearchable = prefixedSearchable;
+				if (!deferred.isEmpty()) {
+					synchronized (this.tooltipLock) {
+						this.deferredTooltipInfos.addAll(deferred);
+					}
+				}
 			}
 		}
+	}
+
+	/**
+	 * Puts every element into the uid lookup and returns their uid strings, positionally matching
+	 * {@code ordered}, so the cache can be keyed by ingredient rather than by position in this list.
+	 */
+	private List<String> registerElements(List<IListElementInfo<?>> ordered, IIngredientManager ingredientManager, boolean parallel) {
+		String[] uids = new String[ordered.size()];
+		IntStream indices = parallel
+			? IntStream.range(0, ordered.size()).parallel()
+			: IntStream.range(0, ordered.size());
+		indices.forEach(i -> {
+			IListElementInfo<?> info = ordered.get(i);
+			Object uid = getUid(info.getTypedIngredient(), ingredientManager);
+			this.allElements.put(uid, info.getElement());
+			uids[i] = uid.toString();
+		});
+		return Arrays.asList(uids);
 	}
 
 	@Override
@@ -68,7 +152,7 @@ public class ElementSearch implements IElementSearch {
 		Set<IListElement<?>> results = Collections.newSetFromMap(new IdentityHashMap<>());
 
 		PrefixInfo<IListElementInfo<?>, IListElement<?>> prefixInfo = tokenInfo.prefixInfo();
-		if (prefixInfo == ElementPrefixParser.NO_PREFIX) {
+		if (prefixInfo == noPrefix) {
 			combinedSearchables.getSearchResults(token, results::addAll);
 			return results;
 		}
@@ -88,19 +172,16 @@ public class ElementSearch implements IElementSearch {
 		this.allElements.put(uid, element);
 		String uidString = uid.toString();
 		boolean backgroundThread = isBackgroundThread();
-		for (Map.Entry<PrefixInfo<IListElementInfo<?>, IListElement<?>>, PrefixedSearchable<IListElementInfo<?>, IListElement<?>>> entry : this.prefixedSearchables.entrySet()) {
-			PrefixInfo<IListElementInfo<?>, IListElement<?>> prefixInfo = entry.getKey();
-			PrefixedSearchable<IListElementInfo<?>, IListElement<?>> prefixedSearchable = entry.getValue();
+
+		for (PrefixedSearchable<IListElementInfo<?>, IListElement<?>> prefixedSearchable : this.prefixedSearchables.values()) {
 			if (prefixedSearchable.getMode() == SearchMode.DISABLED) {
 				continue;
 			}
-			char prefix = prefixInfo.getPrefix();
+			char prefix = prefixedSearchable.getPrefixInfo().getPrefix();
 			if (indexFromCache(prefixedSearchable, prefix, element, uidString)) {
 				continue;
 			}
 			if (backgroundThread && prefix == TOOLTIP_PREFIX) {
-				// Tooltip generation must happen on the render thread; defer it so it is
-				// still indexed later instead of being dropped.
 				synchronized (this.tooltipLock) {
 					this.deferredTooltipInfos.add(new DeferredTooltip(info, uidString));
 				}
@@ -111,11 +192,30 @@ public class ElementSearch implements IElementSearch {
 	}
 
 	/**
-	 * Indexes an ingredient from previously cached search strings, if they are available.
+	 * Looks up an ingredient's previously cached search strings, if they are available.
 	 * <p>
 	 * This is what keeps tooltip indexing off the render thread: deriving a tooltip means firing
 	 * the mod tooltip events for every single ingredient, which is by far the most expensive part
 	 * of building the search index. A cache hit skips that entirely.
+	 */
+	@Nullable
+	private List<String> getCachedStrings(String uidString, char prefix) {
+		SearchStringCache cache = this.searchStringCache;
+		if (cache == null) {
+			return null;
+		}
+		return cache.getCachedStrings(uidString, prefix);
+	}
+
+	private void recordStrings(String uidString, char prefix, Collection<String> strings) {
+		SearchStringCache cache = this.searchStringCache;
+		if (cache != null) {
+			cache.recordStrings(uidString, prefix, strings);
+		}
+	}
+
+	/**
+	 * Indexes an ingredient into an already-built storage from cached search strings.
 	 *
 	 * @return true if the ingredient was indexed from the cache and needs no further work
 	 */
@@ -125,17 +225,13 @@ public class ElementSearch implements IElementSearch {
 		IListElement<?> element,
 		String uidString
 	) {
-		SearchStringCache cache = this.searchStringCache;
-		if (cache == null) {
-			return false;
-		}
-		List<String> cached = cache.getCachedStrings(uidString, prefix);
+		List<String> cached = getCachedStrings(uidString, prefix);
 		if (cached == null) {
 			return false;
 		}
 		ISearchStorage<IListElement<?>> storage = prefixedSearchable.getSearchStorage();
 		for (String string : cached) {
-			storage.put(string, element);
+			putIfNotBlank(storage, string, element);
 		}
 		return true;
 	}
@@ -153,143 +249,9 @@ public class ElementSearch implements IElementSearch {
 		Collection<String> strings = prefixedSearchable.getStrings(info);
 		ISearchStorage<IListElement<?>> storage = prefixedSearchable.getSearchStorage();
 		for (String string : strings) {
-			storage.put(string, element);
+			putIfNotBlank(storage, string, element);
 		}
-		SearchStringCache cache = this.searchStringCache;
-		if (cache != null) {
-			cache.recordStrings(uidString, prefix, strings);
-		}
-	}
-
-	private static boolean isBackgroundThread() {
-		try {
-			Minecraft mc = Minecraft.getInstance();
-			if (mc == null) {
-				return false;
-			}
-			return !mc.isSameThread();
-		} catch (Exception e) {
-			return false;
-		}
-	}
-
-	private static <T> Object getUid(ITypedIngredient<T> typedIngredient, IIngredientManager ingredientManager) {
-		IIngredientHelper<T> ingredientHelper = ingredientManager.getIngredientHelper(typedIngredient.getType());
-		return ingredientHelper.getUniqueId(typedIngredient.getIngredient(), UidContext.Ingredient);
-	}
-
-	@Override
-	public void addAll(Collection<IListElementInfo<?>> infos, IIngredientManager ingredientManager) {
-		addAll(infos, ingredientManager, null);
-	}
-
-	public void addAll(Collection<IListElementInfo<?>> infos, IIngredientManager ingredientManager, @Nullable SearchStringCache cache) {
-		this.searchStringCache = cache;
-		if (isBackgroundThread()) {
-			addAllBackground(infos, ingredientManager);
-			return;
-		}
-		if (DebugConfig.isParallelSearchEnabled() && infos.size() >= 100) {
-			addAllParallel(infos, ingredientManager);
-		} else {
-			addAllSequential(infos, ingredientManager);
-		}
-	}
-
-	private void addAllSequential(Collection<IListElementInfo<?>> infos, IIngredientManager ingredientManager) {
-		List<String> uids = registerElements(infos, ingredientManager, false);
-
-		for (PrefixedSearchable<IListElementInfo<?>, IListElement<?>> prefixedSearchable : this.prefixedSearchables.values()) {
-			if (prefixedSearchable.getMode() != SearchMode.DISABLED) {
-				indexAll(prefixedSearchable, infos, uids, null);
-			}
-		}
-	}
-
-	private void addAllParallel(Collection<IListElementInfo<?>> infos, IIngredientManager ingredientManager) {
-		List<String> uids = registerElements(infos, ingredientManager, true);
-
-		// Note: getStrings() calls tooltip generation which fires Forge events and
-		// touches Minecraft thread-local state. This MUST run on the calling thread,
-		// NOT on ForkJoinPool threads, to avoid ClassNotFoundException and
-		// ConcurrentModificationException in mod event handlers.
-		for (PrefixedSearchable<IListElementInfo<?>, IListElement<?>> prefixedSearchable : this.prefixedSearchables.values()) {
-			if (prefixedSearchable.getMode() == SearchMode.DISABLED) {
-				continue;
-			}
-			indexAll(prefixedSearchable, infos, uids, null);
-		}
-	}
-
-	private void addAllBackground(Collection<IListElementInfo<?>> infos, IIngredientManager ingredientManager) {
-		List<String> uids = registerElements(infos, ingredientManager, true);
-		List<DeferredTooltip> deferred = new ArrayList<>();
-
-		for (Map.Entry<PrefixInfo<IListElementInfo<?>, IListElement<?>>, PrefixedSearchable<IListElementInfo<?>, IListElement<?>>> entry : this.prefixedSearchables.entrySet()) {
-			PrefixInfo<IListElementInfo<?>, IListElement<?>> prefixInfo = entry.getKey();
-			PrefixedSearchable<IListElementInfo<?>, IListElement<?>> prefixedSearchable = entry.getValue();
-			if (prefixedSearchable.getMode() == SearchMode.DISABLED) {
-				continue;
-			}
-			// Tooltip strings that are already cached get indexed right here on the background
-			// thread; only the ones we have never derived before need the render thread.
-			indexAll(prefixedSearchable, infos, uids, prefixInfo.getPrefix() == TOOLTIP_PREFIX ? deferred : null);
-		}
-
-		if (!deferred.isEmpty()) {
-			synchronized (this.tooltipLock) {
-				this.deferredTooltipInfos.addAll(deferred);
-			}
-		}
-	}
-
-	/**
-	 * Puts every element into the uid lookup and returns their uid strings, positionally matching
-	 * {@code infos}, so the cache can be keyed by ingredient rather than by position in this list.
-	 * The previous cache lookup used the list index as the key, which is not stable across
-	 * launches, so it could never produce a usable hit.
-	 */
-	private List<String> registerElements(Collection<IListElementInfo<?>> infos, IIngredientManager ingredientManager, boolean parallel) {
-		List<IListElementInfo<?>> ordered = infos instanceof List<IListElementInfo<?>> list ? list : new ArrayList<>(infos);
-		String[] uids = new String[ordered.size()];
-		java.util.stream.IntStream indices = parallel
-			? java.util.stream.IntStream.range(0, ordered.size()).parallel()
-			: java.util.stream.IntStream.range(0, ordered.size());
-		indices.forEach(i -> {
-			IListElementInfo<?> info = ordered.get(i);
-			Object uid = getUid(info.getTypedIngredient(), ingredientManager);
-			this.allElements.put(uid, info.getElement());
-			uids[i] = uid.toString();
-		});
-		return java.util.Arrays.asList(uids);
-	}
-
-	/**
-	 * Indexes one prefix across every ingredient, preferring cached strings.
-	 *
-	 * @param deferTo if non-null, ingredients with no cached strings are collected here instead of
-	 *                having their strings derived now
-	 */
-	private void indexAll(
-		PrefixedSearchable<IListElementInfo<?>, IListElement<?>> prefixedSearchable,
-		Collection<IListElementInfo<?>> infos,
-		List<String> uids,
-		@Nullable List<DeferredTooltip> deferTo
-	) {
-		char prefix = prefixedSearchable.getPrefixInfo().getPrefix();
-		int index = 0;
-		for (IListElementInfo<?> info : infos) {
-			String uidString = uids.get(index++);
-			IListElement<?> element = info.getElement();
-			if (indexFromCache(prefixedSearchable, prefix, element, uidString)) {
-				continue;
-			}
-			if (deferTo != null) {
-				deferTo.add(new DeferredTooltip(info, uidString));
-				continue;
-			}
-			indexAndRecord(prefixedSearchable, prefix, info, element, uidString);
-		}
+		recordStrings(uidString, prefix, strings);
 	}
 
 	@Override
@@ -342,6 +304,37 @@ public class ElementSearch implements IElementSearch {
 		this.searchStringCache = null;
 		cache.saveAsync();
 		cache.release();
+	}
+
+	private static boolean isBackgroundThread() {
+		try {
+			Minecraft mc = Minecraft.getInstance();
+			if (mc == null) {
+				return false;
+			}
+			return !mc.isSameThread();
+		} catch (Exception e) {
+			return false;
+		}
+	}
+
+	static <T> void putIfNotBlank(ISearchStorage<T> storage, String string, T element) {
+		String trimmedString = string.trim();
+		if (!trimmedString.isEmpty()) {
+			storage.put(trimmedString, element);
+		}
+	}
+
+	static <T> void putIfNotBlank(ISearchStorageBuilder<T> storageBuilder, String string, T element) {
+		String trimmedString = string.trim();
+		if (!trimmedString.isEmpty()) {
+			storageBuilder.put(trimmedString, element);
+		}
+	}
+
+	private static <T> Object getUid(ITypedIngredient<T> typedIngredient, IIngredientManager ingredientManager) {
+		IIngredientHelper<T> ingredientHelper = ingredientManager.getIngredientHelper(typedIngredient.getType());
+		return ingredientHelper.getUniqueId(typedIngredient.getIngredient(), UidContext.Ingredient);
 	}
 
 	@Override

@@ -40,7 +40,10 @@ public class RecipeMap {
 	private static final int PARALLEL_THRESHOLD = 100;
 
 	private final RecipeIngredientTable recipeTable = new RecipeIngredientTable();
-	private final Multimap<Object, RecipeType<?>> ingredientUidToCategoryMap = Multimaps.synchronizedSetMultimap(Multimaps.newSetMultimap(new ConcurrentHashMap<>(), ConcurrentHashMap::newKeySet));
+	// These are written from the background loading threads, so they have to stay concurrent;
+	// fastutil's Object2ObjectOpenHashMap that upstream uses here is not thread-safe.
+	// Upstream's small per-key set sizing still applies, and compact() below reclaims far more.
+	private final Multimap<Object, RecipeType<?>> ingredientUidToCategoryMap = Multimaps.synchronizedSetMultimap(Multimaps.newSetMultimap(new ConcurrentHashMap<>(), () -> ConcurrentHashMap.newKeySet(2)));
 	private final Multimap<Object, RecipeType<?>> categoryCatalystUidToRecipeCategoryMap = Multimaps.synchronizedSetMultimap(Multimaps.newSetMultimap(new ConcurrentHashMap<>(), ConcurrentHashMap::newKeySet));
 	/**
 	 * Read-only snapshots taken at {@link #compact()}, once loading has stopped writing.

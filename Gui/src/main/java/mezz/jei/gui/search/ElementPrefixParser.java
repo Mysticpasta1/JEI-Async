@@ -3,13 +3,14 @@ package mezz.jei.gui.search;
 import it.unimi.dsi.fastutil.chars.Char2ObjectMap;
 import it.unimi.dsi.fastutil.chars.Char2ObjectOpenHashMap;
 import mezz.jei.api.helpers.IColorHelper;
+import mezz.jei.api.helpers.IModIdHelper;
 import mezz.jei.api.runtime.IIngredientManager;
+import mezz.jei.api.search.ISearchStorageBuilderFactory;
 import mezz.jei.common.config.IIngredientFilterConfig;
 import mezz.jei.common.util.Translator;
-import mezz.jei.core.search.LimitedStringStorage;
+import mezz.jei.core.search.LimitedStringStorageBuilder;
 import mezz.jei.core.search.PrefixInfo;
 import mezz.jei.core.search.SearchMode;
-import mezz.jei.core.search.suffixtree.GeneralizedSuffixTree;
 import mezz.jei.gui.ingredients.IListElement;
 import mezz.jei.gui.ingredients.IListElementInfo;
 
@@ -23,19 +24,31 @@ import java.util.regex.Pattern;
 import java.util.stream.StreamSupport;
 
 public class ElementPrefixParser {
-	public static final PrefixInfo<IListElementInfo<?>, IListElement<?>> NO_PREFIX = new PrefixInfo<>(
-			'\0',
-			() -> SearchMode.ENABLED,
-			IListElementInfo::getNames,
-			GeneralizedSuffixTree::new
-	);
 	private static final Pattern SPACE_PATTERN = Pattern.compile("\\s");
 	private static final Pattern MOD_NAME_SEPARATOR_PATTERN = Pattern.compile("(?=[A-Z_-])|\\s+");
 
 	private final Char2ObjectMap<PrefixInfo<IListElementInfo<?>, IListElement<?>>> map = new Char2ObjectOpenHashMap<>();
+	private final PrefixInfo<IListElementInfo<?>, IListElement<?>> noPrefix;
 
-	public ElementPrefixParser(IIngredientManager ingredientManager, IIngredientFilterConfig config, IColorHelper colorHelper) {
+	public ElementPrefixParser(
+		IIngredientManager ingredientManager,
+		IIngredientFilterConfig config,
+		IColorHelper colorHelper,
+		IModIdHelper modIdHelper,
+		ISearchStorageBuilderFactory searchStorageBuilderFactory
+	) {
+		ISearchStorageBuilderFactory limitedStringStorageBuilderFactory = createLimitedStringStorageBuilderFactory(searchStorageBuilderFactory);
+
+		this.noPrefix = new PrefixInfo<>(
+			"unprefixed",
+			'\0',
+			() -> SearchMode.ENABLED,
+			IListElementInfo::getNames,
+			searchStorageBuilderFactory
+		);
+
 		addPrefix(new PrefixInfo<>(
+			"mod_names",
 			'@',
 			config::getModNameSearchMode,
 			info -> {
@@ -43,6 +56,12 @@ public class ElementPrefixParser {
 
 				if (config.getSearchModIds()) {
 					modNames.addAll(info.getModIds());
+				}
+
+				if (config.getSearchModAliases()) {
+					for (String modId : info.getModIds()) {
+						modNames.addAll(modIdHelper.getModAliases(modId));
+					}
 				}
 
 				if (config.getSearchShortModNames()) {
@@ -61,27 +80,31 @@ public class ElementPrefixParser {
 
 				return sanitizedModNames;
 			},
-			LimitedStringStorage::new
+			limitedStringStorageBuilderFactory
 		));
 		addPrefix(new PrefixInfo<>(
+			"tooltips",
 			'#',
 			config::getTooltipSearchMode,
 			e -> e.getTooltipStrings(config, ingredientManager),
-			GeneralizedSuffixTree::new
+			searchStorageBuilderFactory
 		));
 		addPrefix(new PrefixInfo<>(
+			"tags",
 			'$',
 			config::getTagSearchMode,
 			e -> e.getTagStrings(ingredientManager),
-			LimitedStringStorage::new
+			limitedStringStorageBuilderFactory
 		));
 		addPrefix(new PrefixInfo<>(
+			"creative_tabs",
 			'%',
 			config::getCreativeTabSearchMode,
 			e -> e.getCreativeTabsStrings(ingredientManager),
-			LimitedStringStorage::new
+			limitedStringStorageBuilderFactory
 		));
 		addPrefix(new PrefixInfo<>(
+			"colors",
 			'^',
 			config::getColorSearchMode,
 			e -> {
@@ -92,14 +115,31 @@ public class ElementPrefixParser {
 					.distinct()
 					.toList();
 			},
-			LimitedStringStorage::new
+			limitedStringStorageBuilderFactory
 		));
 		addPrefix(new PrefixInfo<>(
+			"identifiers",
 			'&',
 			config::getResourceLocationSearchMode,
 			element -> List.of(element.getResourceLocation().toString()),
-			GeneralizedSuffixTree::new
+			searchStorageBuilderFactory
 		));
+	}
+
+	private static ISearchStorageBuilderFactory createLimitedStringStorageBuilderFactory(
+		ISearchStorageBuilderFactory searchStorageBuilderFactory
+	) {
+		return new ISearchStorageBuilderFactory() {
+			@Override
+			public <T> LimitedStringStorageBuilder<T> create() {
+				return new LimitedStringStorageBuilder<>(searchStorageBuilderFactory);
+			}
+
+			@Override
+			public <T> LimitedStringStorageBuilder<T> create(String id) {
+				return new LimitedStringStorageBuilder<>(searchStorageBuilderFactory, id);
+			}
+		};
 	}
 
 	private void addPrefix(PrefixInfo<IListElementInfo<?>, IListElement<?>> info) {
@@ -108,8 +148,12 @@ public class ElementPrefixParser {
 
 	public Collection<PrefixInfo<IListElementInfo<?>, IListElement<?>>> allPrefixInfos() {
 		Collection<PrefixInfo<IListElementInfo<?>, IListElement<?>>> values = new ArrayList<>(map.values());
-		values.add(NO_PREFIX);
+		values.add(noPrefix);
 		return values;
+	}
+
+	public PrefixInfo<IListElementInfo<?>, IListElement<?>> getNoPrefix() {
+		return noPrefix;
 	}
 
 	public record TokenInfo(String token, PrefixInfo<IListElementInfo<?>, IListElement<?>> prefixInfo) {}
@@ -121,7 +165,7 @@ public class ElementPrefixParser {
 		char firstChar = token.charAt(0);
 		PrefixInfo<IListElementInfo<?>, IListElement<?>> prefixInfo = map.get(firstChar);
 		if (prefixInfo == null || prefixInfo.getMode() == SearchMode.DISABLED) {
-			return Optional.of(new TokenInfo(token, NO_PREFIX));
+			return Optional.of(new TokenInfo(token, noPrefix));
 		}
 		if (token.length() == 1) {
 			return Optional.empty();

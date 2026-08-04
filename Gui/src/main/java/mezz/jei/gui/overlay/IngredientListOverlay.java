@@ -5,10 +5,9 @@ import mezz.jei.api.ingredients.IIngredientType;
 import mezz.jei.api.ingredients.ITypedIngredient;
 import mezz.jei.api.runtime.IIngredientListOverlay;
 import mezz.jei.api.runtime.IScreenHelper;
-import mezz.jei.common.config.HistoryDisplaySide;
 import mezz.jei.common.config.IClientConfig;
 import mezz.jei.common.config.IClientToggleState;
-import mezz.jei.common.config.file.IConfigListener;
+import mezz.jei.common.config.IIngredientGridConfig;
 import mezz.jei.common.input.IInternalKeyMappings;
 import mezz.jei.common.util.ImmutableRect2i;
 import mezz.jei.gui.GuiProperties;
@@ -29,6 +28,9 @@ import mezz.jei.gui.input.handlers.NullInputHandler;
 import mezz.jei.gui.input.handlers.ProxyDragHandler;
 import mezz.jei.gui.input.handlers.ProxyInputHandler;
 import mezz.jei.gui.overlay.bookmarks.history.LookupHistoryOverlay;
+import mezz.jei.gui.overlay.elements.IElement;
+import mezz.jei.gui.overlay.ingredients.IIngredientGridSource;
+import mezz.jei.gui.overlay.ingredients.IngredientGridWithNavigation;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import org.jetbrains.annotations.Nullable;
@@ -44,6 +46,8 @@ public class IngredientListOverlay implements IIngredientListOverlay, IRecipeFoc
 	private static final int INNER_PADDING = 2;
 	private static final int BUTTON_SIZE = 20;
 	private static final int SEARCH_HEIGHT = BUTTON_SIZE;
+	private static final int LOOKUP_HISTORY_BOTTOM_PADDING = BORDER_MARGIN;
+	private static final int LOOKUP_HISTORY_PADDING_EXTRA = LOOKUP_HISTORY_BOTTOM_PADDING - INNER_PADDING;
 
 	private final GuiIconToggleButton configButton;
 	private final IngredientGridWithNavigation contents;
@@ -54,13 +58,8 @@ public class IngredientListOverlay implements IIngredientListOverlay, IRecipeFoc
 	private final IInternalKeyMappings keyBindings;
 	private final ScreenPropertiesCache screenPropertiesCache;
 	private final IFilterTextSource filterTextSource;
+	private String lastFilterText = "";
 
-
-	// these need to be stored as strong references here because listeners are weakly stored elsewhere
-	@SuppressWarnings("FieldCanBeLocal")
-	private final IConfigListener<Boolean> lookupHistoryEnabledListener;
-	@SuppressWarnings("FieldCanBeLocal")
-	private final IConfigListener<HistoryDisplaySide> lookupHistoryViewSideListener;
 
 	public IngredientListOverlay(
 		IIngredientGridSource ingredientGridSource,
@@ -68,6 +67,7 @@ public class IngredientListOverlay implements IIngredientListOverlay, IRecipeFoc
 		IScreenHelper screenHelper,
 		IngredientGridWithNavigation contents,
 		LookupHistoryOverlay lookupHistoryOverlay,
+		IIngredientGridConfig ingredientGridConfig,
 		IClientConfig clientConfig,
 		IClientToggleState toggleState,
 		IInternalKeyMappings keyBindings
@@ -82,9 +82,10 @@ public class IngredientListOverlay implements IIngredientListOverlay, IRecipeFoc
 		this.keyBindings = keyBindings;
 		this.filterTextSource = filterTextSource;
 		this.searchField.setValue(filterTextSource.getFilterText());
+		this.lastFilterText = filterTextSource.getFilterText();
 		this.searchField.setFocused(false);
 		this.searchField.setResponder(filterTextSource::setFilterText);
-		filterTextSource.addListener(this.searchField::setValue);
+		filterTextSource.addListener(this::onFilterTextChanged);
 
 		ingredientGridSource.addSourceListChangedListener(() -> {
 			Minecraft minecraft = Minecraft.getInstance();
@@ -95,11 +96,11 @@ public class IngredientListOverlay implements IIngredientListOverlay, IRecipeFoc
 
 		this.configButton = ConfigButton.create(this::isListDisplayed, toggleState, keyBindings);
 
-		this.lookupHistoryEnabledListener = v -> onScreenPropertiesChanged();
-		this.lookupHistoryViewSideListener = v -> onScreenPropertiesChanged();
-
-		clientConfig.addLookupHistoryEnabledListener(lookupHistoryEnabledListener);
-		clientConfig.addLookupHistoryDisplaySideListener(lookupHistoryViewSideListener);
+		clientConfig.addLookupHistoryEnabledListener(v -> onScreenPropertiesChanged());
+		clientConfig.addLookupHistoryDisplaySideListener(v -> onScreenPropertiesChanged());
+		clientConfig.addMaxLookupHistoryRowsListener(v -> onScreenPropertiesChanged());
+		clientConfig.addCenterSearchBarEnabledListener(v -> onScreenPropertiesChanged());
+		ingredientGridConfig.addLayoutListener(this::onScreenPropertiesChanged);
 	}
 
 	@Override
@@ -138,19 +139,20 @@ public class IngredientListOverlay implements IIngredientListOverlay, IRecipeFoc
 
 		ImmutableRect2i availableContentsArea = getAvailableContentsArea(displayArea, searchBarCentered);
 		if (clientConfig.isLookupHistoryEnabled() && lookupHistoryOverlay.isOnSide()) {
-			int historyRows = clientConfig.getMaxLookupHistoryRows();
-			availableContentsArea  = availableContentsArea.cropBottom(historyRows * LookupHistoryOverlay.SLOT_HEIGHT);
-			ImmutableRect2i historyArea = displayArea
-				.insetBy(BORDER_MARGIN)
-				.moveUp(BUTTON_SIZE + INNER_PADDING)
-				.keepBottom(historyRows * LookupHistoryOverlay.SLOT_HEIGHT);
-			this.lookupHistoryOverlay.updateBounds(historyArea, guiExclusionAreas, null);
-			this.lookupHistoryOverlay.updateLayout();
+			int historyHeight = lookupHistoryOverlay.getDisplayHeight();
+			if (historyHeight > 0) {
+				ImmutableRect2i historyArea = getLookupHistoryArea(displayArea, searchBarCentered, historyHeight);
+				availableContentsArea = cropBottomTo(
+					availableContentsArea,
+					historyArea.y() - LOOKUP_HISTORY_PADDING_EXTRA
+				);
+				this.lookupHistoryOverlay.updateBounds(historyArea, guiExclusionAreas, null);
+				this.lookupHistoryOverlay.updateLayout();
+			}
 		}
-		int legacySize = contents.size();
+		IElement<?> pageAnchorElement = this.contents.getPageAnchorElement();
 		this.contents.updateBounds(availableContentsArea, guiExclusionAreas, null);
-		boolean resetToFirstPage = legacySize != contents.size();
-		this.contents.updateLayout(resetToFirstPage);
+		this.contents.updateLayoutKeepingPageAnchorVisible(pageAnchorElement);
 
 		final ImmutableRect2i searchAndConfigArea = getSearchAndConfigArea(displayArea, searchBarCentered, guiProperties);
 		final ImmutableRect2i searchArea = searchAndConfigArea.cropRight(BUTTON_SIZE);
@@ -160,6 +162,14 @@ public class IngredientListOverlay implements IIngredientListOverlay, IRecipeFoc
 		this.searchField.updateBounds(searchArea);
 
 		this.configButton.updateBounds(configButtonArea);
+	}
+
+	private void onFilterTextChanged(String filterText) {
+		this.searchField.setValue(filterText);
+		if (!this.lastFilterText.isEmpty() && filterText.isEmpty()) {
+			this.contents.updateLayoutToFirstPage();
+		}
+		this.lastFilterText = filterText;
 	}
 
 	private static boolean isSearchBarCentered(IClientConfig clientConfig, IGuiProperties guiProperties) {
@@ -172,6 +182,26 @@ public class IngredientListOverlay implements IIngredientListOverlay, IRecipeFoc
 			return displayArea;
 		}
 		return displayArea.cropBottom(SEARCH_HEIGHT + INNER_PADDING);
+	}
+
+	private static ImmutableRect2i getLookupHistoryArea(ImmutableRect2i displayArea, boolean searchBarCentered, int lookupHistoryHeight) {
+		int bottomReservedHeight = searchBarCentered ? 0 : SEARCH_HEIGHT + LOOKUP_HISTORY_BOTTOM_PADDING;
+		return displayArea
+			.insetBy(BORDER_MARGIN)
+			.cropBottom(bottomReservedHeight)
+			.keepBottom(lookupHistoryHeight);
+	}
+
+	private static ImmutableRect2i cropBottomTo(ImmutableRect2i area, int bottomY) {
+		int cropAmount = getBottom(area) - bottomY;
+		if (cropAmount <= 0) {
+			return area;
+		}
+		return area.cropBottom(cropAmount);
+	}
+
+	private static int getBottom(ImmutableRect2i area) {
+		return area.y() + area.height();
 	}
 
 	private ImmutableRect2i getSearchAndConfigArea(ImmutableRect2i displayArea, boolean searchBarCentered, IGuiProperties guiProperties) {
@@ -227,6 +257,16 @@ public class IngredientListOverlay implements IIngredientListOverlay, IRecipeFoc
 	public void handleTick() {
 		if (this.isListDisplayed()) {
 			this.searchField.tick();
+		}
+	}
+
+	public void tick() {
+		handleTick();
+		if (isListDisplayed()) {
+			this.contents.tick();
+		}
+		if (this.screenPropertiesCache.hasValidScreen() && toggleState.isOverlayEnabled()) {
+			this.lookupHistoryOverlay.tick();
 		}
 	}
 

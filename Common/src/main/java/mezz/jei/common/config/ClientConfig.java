@@ -20,8 +20,8 @@ public final class ClientConfig implements IClientConfig {
 	private static IClientConfig instance;
 
 	// appearance
-	private final Supplier<Boolean> centerSearchBarEnabled;
-	private final Supplier<Integer> maxRecipeGuiHeight;
+	private final ConfigValue<Boolean> centerSearchBarEnabled;
+	private final ConfigValue<Integer> maxRecipeGuiHeight;
 
 	// cheat_mode
 	private final Supplier<GiveMode> giveMode;
@@ -30,6 +30,7 @@ public final class ClientConfig implements IClientConfig {
 
 	// bookmarks
 	private final Supplier<Boolean> addBookmarksToFrontEnabled;
+	private final Supplier<Boolean> bookmarkOutputAsRecipe;
 	private final Supplier<List<BookmarkTooltipFeature>> bookmarkTooltipFeatures;
 	private final Supplier<Boolean> holdShiftToShowBookmarkTooltipFeaturesEnabled;
 	private final Supplier<Boolean> dragToRearrangeBookmarksEnabled;
@@ -41,7 +42,7 @@ public final class ClientConfig implements IClientConfig {
 	private final ConfigValue<HistoryDisplaySide> lookupHistoryDisplaySide;
 
 	// advanced
-	private final Supplier<Boolean> lowMemorySlowSearchEnabled;
+	private final ConfigValue<Boolean> lowMemorySlowSearchEnabled;
 	private final Supplier<Boolean> catchRenderErrorsEnabled;
 	private final Supplier<Boolean> lookupFluidContentsEnabled;
 	private final Supplier<Boolean> lookupBlockTagsEnabled;
@@ -53,7 +54,7 @@ public final class ClientConfig implements IClientConfig {
 	private final Supplier<Integer> smoothScrollRate;
 
 	// sorting
-	private final Supplier<List<IngredientSortStage>> ingredientSorterStages;
+	private final ConfigValue<List<IngredientSortStage>> ingredientSorterStages;
 	private final ConfigValue<List<RecipeSorterStage>> recipeSorterStages;
 
 	// tags
@@ -101,6 +102,11 @@ public final class ClientConfig implements IClientConfig {
 			"AddBookmarksToFrontEnabled",
 			false,
 			"Add new bookmarks to the front of the bookmark list instead of the end."
+		);
+		bookmarkOutputAsRecipe = bookmarks.addBoolean(
+			"BookmarkOutputAsRecipe",
+			true,
+			"Bookmark a recipe instead of an ingredient when the bookmark key is pressed on a recipe output."
 		);
 		bookmarkTooltipFeatures = bookmarks.addList(
 			"BookmarkTooltipFeatures",
@@ -236,8 +242,23 @@ public final class ClientConfig implements IClientConfig {
 	}
 
 	@Override
+	public void addCenterSearchBarEnabledListener(IConfigListener<Boolean> listener) {
+		centerSearchBarEnabled.addListener(listener::onConfigValueChanged);
+	}
+
+	@Override
+	public void addMaxRecipeGuiHeightListener(IConfigListener<Integer> listener) {
+		maxRecipeGuiHeight.addListener(listener::onConfigValueChanged);
+	}
+
+	@Override
 	public boolean isLowMemorySlowSearchEnabled() {
 		return lowMemorySlowSearchEnabled.get();
+	}
+
+	@Override
+	public void addLowMemorySlowSearchEnabledListener(IConfigListener<Boolean> listener) {
+		lowMemorySlowSearchEnabled.addListener(listener::onConfigValueChanged);
 	}
 
 	@Override
@@ -253,6 +274,11 @@ public final class ClientConfig implements IClientConfig {
 	@Override
 	public boolean isAddingBookmarksToFrontEnabled() {
 		return addBookmarksToFrontEnabled.get();
+	}
+
+	@Override
+	public boolean isBookmarkOutputAsRecipeEnabled() {
+		return bookmarkOutputAsRecipe.get();
 	}
 
 	@Override
@@ -302,7 +328,7 @@ public final class ClientConfig implements IClientConfig {
 
 	@Override
 	public void addLookupHistoryEnabledListener(IConfigListener<Boolean> listener) {
-		lookupHistoryEnabled.addListener(listener);
+		lookupHistoryEnabled.addListener(listener::onConfigValueChanged);
 	}
 
 	@Override
@@ -322,7 +348,17 @@ public final class ClientConfig implements IClientConfig {
 
 	@Override
 	public void addLookupHistoryDisplaySideListener(IConfigListener<HistoryDisplaySide> listener) {
-		lookupHistoryDisplaySide.addListener(listener);
+		lookupHistoryDisplaySide.addListener(listener::onConfigValueChanged);
+	}
+
+	@Override
+	public void addMaxLookupHistoryRowsListener(IConfigListener<Integer> listener) {
+		maxLookupHistoryRows.addListener(listener::onConfigValueChanged);
+	}
+
+	@Override
+	public void addMaxLookupHistoryIngredientsListener(IConfigListener<Integer> listener) {
+		maxLookupHistoryIngredients.addListener(listener::onConfigValueChanged);
 	}
 
 	@Override
@@ -343,6 +379,11 @@ public final class ClientConfig implements IClientConfig {
 	@Override
 	public List<IngredientSortStage> getIngredientSorterStages() {
 		return ingredientSorterStages.get();
+	}
+
+	@Override
+	public void addIngredientSorterStagesListener(IConfigListener<List<IngredientSortStage>> listener) {
+		ingredientSorterStages.addListener(listener::onConfigValueChanged);
 	}
 
 	@Override
